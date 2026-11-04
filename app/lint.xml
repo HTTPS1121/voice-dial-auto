@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!-- Intentional: KingInstaller-style Shizuku trick calls IActivityTaskManager$Stub.asInterface
+         via reflection so Package Installer keeps EXTRA_INSTALLER_PACKAGE_NAME=vending. -->
+    <issue id="BlockedPrivateApi">
+        <ignore path="**/playreg/PlayRegistration.kt" />
+    </issue>
+</lint>

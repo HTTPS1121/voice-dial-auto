@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <cache-path name="apk" path="selfapk/" />
+    <!-- v12: exported log (Settings → אבחון → שתף לוג) -->
+    <cache-path name="logs" path="logshare/" />
+</paths>

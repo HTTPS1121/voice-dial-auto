@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <SeekBarPreference
+        app:key="countdown_half_s"
+        app:title="@string/st_countdown"
+        app:min="0"
+        android:max="20"
+        app:defaultValue="10"
+        app:showSeekBarValue="false"
+        app:updatesContinuously="true"
+        app:iconSpaceReserved="false" />
+    <SwitchPreferenceCompat
+        app:key="action_call"
+        app:title="@string/st_action_call"
+        app:summary="@string/st_action_call_sum"
+        app:defaultValue="false"
+        app:iconSpaceReserved="false" />
+</PreferenceScreen>

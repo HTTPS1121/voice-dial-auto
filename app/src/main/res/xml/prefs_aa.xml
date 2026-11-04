@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <Preference
+        app:key="aa_status"
+        app:title="@string/st_aa_status"
+        app:selectable="false"
+        app:iconSpaceReserved="false" />
+    <Preference
+        app:key="aa_reinstall"
+        app:title="@string/st_aa_reinstall"
+        app:summary="@string/st_aa_reinstall_sum"
+        app:iconSpaceReserved="false" />
+    <Preference
+        app:key="aa_adb"
+        app:title="@string/st_aa_adb"
+        app:summary="@string/st_aa_adb_sum"
+        app:iconSpaceReserved="false" />
+    <Preference
+        app:key="aa_set_installer"
+        app:title="@string/st_aa_set_installer"
+        app:summary="@string/st_aa_set_installer_sum"
+        app:iconSpaceReserved="false" />
+    <Preference
+        app:key="aa_warning"
+        app:title="@string/st_aa_warning"
+        app:summary="@string/st_aa_warning_sum"
+        app:selectable="false"
+        app:iconSpaceReserved="false" />
+</PreferenceScreen>

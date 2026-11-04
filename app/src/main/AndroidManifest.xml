@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <uses-permission android:name="android.permission.CALL_PHONE" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- v9, optional: call-state callback on Android 12+ (interrupt TTS/listening on incoming calls). -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+
+    <!-- Telephony is useful but not mandatory (DHU/tablets). -->
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+
+    <!-- Android 11+ package visibility: we need to see the speech recognition service. -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <!-- Play-registration helper: package installer (URI grants), Play, Shizuku. -->
+        <package android:name="com.google.android.packageinstaller" />
+        <package android:name="com.android.packageinstaller" />
+        <package android:name="com.android.vending" />
+        <package android:name="moe.shizuku.privileged.api" />
+    </queries>
+
+    <application
+        android:name=".VoiceDialApp"
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.VoiceDialAuto">
+
+        <!-- Declares Android Auto support (templated app). -->
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
+
+        <!-- Lowest Car App API level this app supports. Level 2 = ConstraintManager.
+             Features needing higher levels (CarAudioRecord = 5) are checked at runtime. -->
+        <meta-data
+            android:name="androidx.car.app.minCarApiLevel"
+            android:value="2" />
+
+        <!-- Branded background for the permission request shown on the phone. -->
+        <meta-data
+            android:name="androidx.car.app.theme"
+            android:resource="@style/CarAppTheme" />
+
+        <service
+            android:name=".car.VoiceDialCarAppService"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:label="@string/app_name"
+            tools:ignore="ExportedService">
+            <intent-filter>
+                <action android:name="androidx.car.app.CarAppService" />
+                <!-- Default: androidx.car.app.category.CALLING (see app/build.gradle.kts). -->
+                <category android:name="${carAppCategory}" />
+            </intent-filter>
+        </service>
+
+        <!-- Phone-side voice dialer (same flow as the car screen). -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
+            android:screenOrientation="unspecified">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <!-- Settings + matcher test (gear icon). -->
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="false"
+            android:label="@string/ph_settings"
+            android:parentActivityName=".MainActivity"
+            android:configChanges="uiMode" />
+
+        <!-- Shizuku binder handshake (dev.rikka.shizuku:provider). -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:enabled="true"
+            android:exported="true"
+            android:multiprocess="false"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
+        <!-- Private copy of our own APK for the in-app "reinstall as Play" (URI grants only). -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.apkfiles"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/apk_paths" />
+        </provider>
+
+        <!-- Read-only: serves this app's own base.apk for the adb fallback command
+             (content://<pkg>.apk/base.apk). The APK is world-readable anyway. -->
+        <provider
+            android:name=".playreg.SelfApkProvider"
+            android:authorities="${applicationId}.apk"
+            android:exported="true"
+            tools:ignore="ExportedContentProvider" />
+    </application>
+</manifest>

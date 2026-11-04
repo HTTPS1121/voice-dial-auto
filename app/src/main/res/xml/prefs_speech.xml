@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <ListPreference
+        app:key="lang"
+        app:title="@string/st_lang"
+        app:defaultValue="he-IL"
+        app:entries="@array/st_lang_entries"
+        app:entryValues="@array/st_lang_values"
+        app:useSimpleSummaryProvider="true"
+        app:iconSpaceReserved="false" />
+    <SwitchPreferenceCompat
+        app:key="car_mic"
+        app:title="@string/st_car_mic"
+        app:summary="@string/st_car_mic_sum"
+        app:defaultValue="false"
+        app:iconSpaceReserved="false" />
+    <SwitchPreferenceCompat
+        app:key="segmented_recognition"
+        app:title="@string/st_segmented"
+        app:summary="@string/st_segmented_sum"
+        app:defaultValue="true"
+        app:iconSpaceReserved="false" />
+    <PreferenceCategory app:title="@string/st_vad_cat" app:iconSpaceReserved="false">
+        <SwitchPreferenceCompat
+            app:key="vad_enabled"
+            app:title="@string/st_vad_enabled"
+            app:summary="@string/st_vad_enabled_sum"
+            app:defaultValue="true"
+            app:iconSpaceReserved="false" />
+        <ListPreference
+            app:key="vad_sensitivity"
+            app:title="@string/st_vad_sensitivity"
+            app:defaultValue="normal"
+            app:entries="@array/st_vad_sensitivity_entries"
+            app:entryValues="@array/st_vad_sensitivity_values"
+            app:useSimpleSummaryProvider="true"
+            app:dependency="vad_enabled"
+            app:iconSpaceReserved="false" />
+        <SeekBarPreference
+            app:key="vad_hangover_tenths"
+            app:title="@string/st_vad_hangover"
+            app:min="2"
+            android:max="15"
+            app:defaultValue="5"
+            app:showSeekBarValue="false"
+            app:updatesContinuously="true"
+            app:iconSpaceReserved="false" />
+        <Preference
+            app:key="vad_info"
+            app:title="@string/st_vad_info"
+            app:selectable="false"
+            app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+</PreferenceScreen>

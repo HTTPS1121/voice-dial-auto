@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_launcher_background">#FF1A237E</color>
+    <!-- M3 has no "success" role; this green is harmonized with the dynamic primary at runtime. -->
+    <color name="vd_call">#FF1B7F3B</color>
+    <color name="vd_on_call">#FFFFFFFF</color>
+</resources>

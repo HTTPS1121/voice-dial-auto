@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Root: one-line headers that open sub-screens. -->
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <Preference
+        app:key="hdr_speech"
+        app:title="@string/st_hdr_speech"
+        app:summary="@string/st_hdr_speech_sum"
+        app:fragment="com.example.voicedialauto.SettingsActivity$SpeechFragment"
+        app:iconSpaceReserved="false" />
+    <Preference
+        app:key="hdr_timing"
+        app:title="@string/st_hdr_timing"
+        app:summary="@string/st_hdr_timing_sum"
+        app:fragment="com.example.voicedialauto.SettingsActivity$TimingFragment"
+        app:iconSpaceReserved="false" />
+    <Preference
+        app:key="hdr_dial"
+        app:title="@string/st_hdr_dial"
+        app:summary="@string/st_hdr_dial_sum"
+        app:fragment="com.example.voicedialauto.SettingsActivity$DialFragment"
+        app:iconSpaceReserved="false" />
+    <Preference
+        app:key="hdr_contacts"
+        app:title="@string/st_hdr_contacts"
+        app:summary="@string/st_hdr_contacts_sum"
+        app:fragment="com.example.voicedialauto.SettingsActivity$ContactsFragment"
+        app:iconSpaceReserved="false" />
+    <Preference
+        app:key="hdr_aa"
+        app:title="@string/st_hdr_aa"
+        app:summary="@string/st_hdr_aa_sum"
+        app:fragment="com.example.voicedialauto.SettingsActivity$AaFragment"
+        app:iconSpaceReserved="false" />
+    <Preference
+        app:key="hdr_diag"
+        app:title="@string/st_hdr_diag"
+        app:summary="@string/st_hdr_diag_sum"
+        app:fragment="com.example.voicedialauto.SettingsActivity$DiagFragment"
+        app:iconSpaceReserved="false" />
+    <Preference
+        app:key="hdr_perm"
+        app:title="@string/st_hdr_perm"
+        app:summary="@string/st_hdr_perm_sum"
+        app:fragment="com.example.voicedialauto.SettingsActivity$PermFragment"
+        app:iconSpaceReserved="false" />
+    <Preference
+        app:key="hdr_about"
+        app:title="@string/st_hdr_about"
+        app:summary="@string/st_hdr_about_sum"
+        app:fragment="com.example.voicedialauto.SettingsActivity$AboutFragment"
+        app:iconSpaceReserved="false" />
+</PreferenceScreen>

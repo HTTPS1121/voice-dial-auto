@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <SeekBarPreference
+        app:key="name_window_s"
+        app:title="@string/st_name_window"
+        app:min="5"
+        android:max="60"
+        app:defaultValue="10"
+        app:showSeekBarValue="false"
+        app:updatesContinuously="true"
+        app:iconSpaceReserved="false" />
+    <SeekBarPreference
+        app:key="list_window_s"
+        app:title="@string/st_list_window"
+        app:min="10"
+        android:max="120"
+        app:seekBarIncrement="5"
+        app:defaultValue="30"
+        app:showSeekBarValue="false"
+        app:updatesContinuously="true"
+        app:iconSpaceReserved="false" />
+    <Preference
+        app:key="timing_reset"
+        app:title="@string/st_timing_reset"
+        app:summary="@string/st_timing_reset_sum"
+        app:iconSpaceReserved="false" />
+</PreferenceScreen>

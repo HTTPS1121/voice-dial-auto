@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Phone: official Material 3 (Material You). Light/dark follows the system (DayNight);
+         on Android 12+ colours come from the wallpaper (DynamicColors in VoiceDialApp).
+         Below Android 12 the M3 baseline palette is used. No hard-coded surface colours. -->
+    <style name="Theme.VoiceDialAuto" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="preferenceTheme">@style/PreferenceThemeOverlay</item>
+    </style>
+    <!-- Car app theme (referenced by androidx.car.app.theme meta-data). -->
+    <style name="CarAppTheme">
+        <item name="carPermissionActivityLayout">@layout/car_permission_background</item>
+    </style>
+</resources>

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="vd_call">#FF6DD58C</color>
+    <color name="vd_on_call">#FF00391A</color>
+</resources>

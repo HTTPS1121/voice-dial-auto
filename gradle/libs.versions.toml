@@ -1,0 +1,33 @@
+[versions]
+agp = "8.13.2"
+kotlin = "2.2.21"
+carApp = "1.7.0"          # latest STABLE androidx.car.app (Oct 2026: 1.8.0-rc01 / 1.9.0-alpha03 are pre-release)
+coreKtx = "1.16.0"
+activityKtx = "1.10.1"
+appcompat = "1.7.1"
+junit = "4.13.2"
+material = "1.12.0"
+preference = "1.2.1"
+shizuku = "13.1.5"
+hiddenapibypass = "6.1"
+onnxruntime = "1.22.0"   # Silero VAD runtime (MIT)
+androidVad = "2.0.10"    # gkonovalov/android-vad WebRTC module (MIT), fallback VAD
+
+[libraries]
+car-app = { group = "androidx.car.app", name = "app", version.ref = "carApp" }
+car-app-projected = { group = "androidx.car.app", name = "app-projected", version.ref = "carApp" }
+androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+androidx-activity-ktx = { group = "androidx.activity", name = "activity-ktx", version.ref = "activityKtx" }
+androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
+material = { group = "com.google.android.material", name = "material", version.ref = "material" }
+androidx-preference-ktx = { group = "androidx.preference", name = "preference-ktx", version.ref = "preference" }
+shizuku-api = { group = "dev.rikka.shizuku", name = "api", version.ref = "shizuku" }
+shizuku-provider = { group = "dev.rikka.shizuku", name = "provider", version.ref = "shizuku" }
+hiddenapibypass = { group = "org.lsposed.hiddenapibypass", name = "hiddenapibypass", version.ref = "hiddenapibypass" }
+onnxruntime-android = { group = "com.microsoft.onnxruntime", name = "onnxruntime-android", version.ref = "onnxruntime" }
+vad-webrtc = { group = "com.github.gkonovalov.android-vad", name = "webrtc", version.ref = "androidVad" }
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }

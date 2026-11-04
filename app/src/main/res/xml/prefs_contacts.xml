@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <Preference
+        app:key="sync_contacts"
+        app:title="@string/st_sync_contacts"
+        app:summary="@string/st_sync_contacts_sum"
+        app:iconSpaceReserved="false" />
+    <Preference
+        app:key="contacts_count"
+        app:title="@string/st_contacts_count"
+        app:selectable="false"
+        app:iconSpaceReserved="false" />
+    <Preference
+        app:key="matcher_test"
+        app:title="@string/st_matcher"
+        app:summary="@string/st_matcher_sum"
+        app:iconSpaceReserved="false" />
+</PreferenceScreen>

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Voice Dial</string>
+
+    <!-- Car screens -->
+    <string name="car_title">Voice Dial</string>
+    <string name="car_listening_lang">Listening (%1$s)… say a contact name</string>
+    <string name="car_heard">Heard: \"%1$s\"</string>
+    <string name="car_searching">Searching for \"%1$s\"…</string>
+    <string name="car_calling">Calling %1$s…</string>
+    <string name="car_call_failed">Could not start the call to %1$s</string>
+    <string name="car_no_match">No contact found for \"%1$s\"</string>
+    <string name="car_no_speech">I didn\'t hear a name</string>
+    <string name="car_no_contacts">No contacts with phone numbers were found</string>
+    <string name="car_err_not_available">Speech recognition is not available on this phone</string>
+    <string name="car_err_network">Network problem during speech recognition</string>
+    <string name="car_err_language">This language is not available for speech recognition</string>
+    <string name="car_err_other">Speech recognition failed</string>
+    <string name="lang_he_short" translatable="false">עברית</string>
+    <string name="lang_en_short" translatable="false">English</string>
+    <string name="car_permissions_needed">Permissions for microphone, contacts and phone are required. Only use your phone when it is safe and the car is parked.</string>
+    <string name="car_grant">Grant on phone</string>
+    <string name="car_choose_title">Which one? Say a number or name</string>
+
+    <!-- Phone activity -->
+    <string name="car_idle">Tap the mic and say a name</string>
+    <string name="car_last_call">Last call: %1$s</string>
+    <string name="car_recognize">Recognize</string>
+    <string name="car_recognize_again">Recognize again</string>
+    <string name="car_cancel">Cancel</string>
+    <string name="car_call_now">Call now</string>
+    <string name="car_confirm">Calling %1$s (%2$s)…</string>
+    <string name="car_did_you_mean">Did you mean…?</string>
+    <string name="car_out_of_range">There is no number %1$d on the list</string>
+    <string name="car_try_en">Try in English</string>
+    <string name="car_try_he">Try in Hebrew</string>
+    <string name="car_on_list">Choose from the list</string>
+    <string name="tts_calling">Calling %1$s</string>
+    <string name="tts_say_number">Please say the number</string>
+    <string name="tts_no_match">No name found, please try again</string>
+    <string name="tts_single_match">Found one name, %1$s</string>
+    <string name="tts_multiple">Found several names. Please say the number you want.</string>
+    <string name="car_cancel_call">Cancel call</string>
+    <string name="car_cancel_call_secs">Cancel call (%1$d)</string>
+    <string name="car_confirm_simple">Calling %1$s in %2$s seconds</string>
+    <string name="car_no_match_simple">No name found, please try again</string>
+    <string name="car_listen_again">Start listening again</string>
+    <string name="car_sync">סנכרן אנשי קשר</string>
+    <string name="car_sync_done">סונכרנו %1$d אנשי קשר</string>
+    <string name="car_contacts_count">אנשי קשר טעונים: %1$d</string>
+    <string name="car_no_match_diag">לא נמצא איש קשר עבור\n"%1$s"\n\nשאילתה: %2$s\nאנשי קשר טעונים: %3$d\n%4$s</string>
+    <string name="car_top_line">• %1$s (%2$.2f)</string>
+    <string name="car_did_you_mean_scores">אולי התכוונת ל…</string>
+</resources>

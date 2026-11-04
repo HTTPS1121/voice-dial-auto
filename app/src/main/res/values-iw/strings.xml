@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">חיוג קולי</string>
+
+    <string name="car_title">חיוג קולי</string>
+    <string name="car_listening_lang">מקשיב (%1$s)… אמור שם של איש קשר</string>
+    <string name="car_heard">שמעתי: \"%1$s\"</string>
+    <string name="car_searching">מחפש את \"%1$s\"…</string>
+    <string name="car_calling">מתקשר אל %1$s…</string>
+    <string name="car_call_failed">לא ניתן להתחיל שיחה אל %1$s</string>
+    <string name="car_no_match">לא נמצא איש קשר עבור \"%1$s\"</string>
+    <string name="car_no_speech">לא שמעתי שם</string>
+    <string name="car_no_contacts">לא נמצאו אנשי קשר עם מספר טלפון</string>
+    <string name="car_err_not_available">זיהוי דיבור לא זמין בטלפון הזה</string>
+    <string name="car_err_network">בעיית רשת בזיהוי הדיבור</string>
+    <string name="car_err_language">השפה הזו לא זמינה לזיהוי דיבור</string>
+    <string name="car_err_other">זיהוי הדיבור נכשל</string>
+    <string name="car_permissions_needed">נדרשות הרשאות מיקרופון, אנשי קשר וטלפון. השתמש בטלפון רק כשבטוח והרכב חונה.</string>
+    <string name="car_grant">אשר בטלפון</string>
+    <string name="car_choose_title">למי להתקשר? אמור מספר או שם</string>
+
+    <string name="car_idle">לחץ על המיקרופון ואמור שם</string>
+    <string name="car_last_call">שיחה אחרונה: %1$s</string>
+    <string name="car_recognize">זהה</string>
+    <string name="car_recognize_again">זהה שוב</string>
+    <string name="car_cancel">ביטול</string>
+    <string name="car_call_now">חייג עכשיו</string>
+    <string name="car_confirm">מחייג ל%1$s (%2$s)…</string>
+    <string name="car_did_you_mean">אולי התכוונת ל…?</string>
+    <string name="car_out_of_range">אין מספר %1$d ברשימה</string>
+    <string name="car_try_en">נסה באנגלית</string>
+    <string name="car_try_he">נסה בעברית</string>
+    <string name="car_on_list">בחר מהרשימה</string>
+    <string name="tts_calling">מחייג ל%1$s</string>
+    <string name="tts_say_number">נא לומר מספר</string>
+    <string name="tts_no_match">לא נמצא אף שם, נסה מחדש</string>
+    <string name="tts_single_match">נמצא שם אחד, %1$s</string>
+    <string name="tts_multiple">נמצאו כמה שמות, נא להגיד את מספר התוצאה הרצוי</string>
+    <string name="car_cancel_call">בטל התקשרות</string>
+    <string name="car_cancel_call_secs">בטל התקשרות (%1$d)</string>
+    <string name="car_confirm_simple">מתקשר ל%1$s בעוד %2$s שניות</string>
+    <string name="car_no_match_simple">לא נמצא אף שם, נסה מחדש</string>
+    <string name="car_listen_again">התחל האזנה שוב</string>
+    <string name="car_sync">סנכרן אנשי קשר</string>
+    <string name="car_sync_done">סונכרנו %1$d אנשי קשר</string>
+    <string name="car_contacts_count">אנשי קשר טעונים: %1$d</string>
+    <string name="car_no_match_diag">לא נמצא איש קשר עבור\n"%1$s"\n\nשאילתה: %2$s\nאנשי קשר טעונים: %3$d\n%4$s</string>
+    <string name="car_top_line">• %1$s (%2$.2f)</string>
+    <string name="car_did_you_mean_scores">אולי התכוונת ל…</string>
+</resources>

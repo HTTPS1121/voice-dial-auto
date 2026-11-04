@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <Preference
+        app:key="match_log"
+        app:title="@string/st_match_log"
+        app:summary="@string/st_match_log_sum"
+        app:iconSpaceReserved="false" />
+    <Preference
+        app:key="silero_selftest"
+        app:title="@string/st_silero_test"
+        app:summary="@string/st_silero_test_sum"
+        app:iconSpaceReserved="false" />
+    <PreferenceCategory app:title="@string/st_filelog" app:iconSpaceReserved="false">
+        <Preference app:key="log_view" app:title="@string/st_log_view" app:summary="@string/st_log_view_sum" app:iconSpaceReserved="false" />
+        <Preference app:key="log_copy" app:title="@string/st_log_copy" app:iconSpaceReserved="false" />
+        <Preference app:key="log_share" app:title="@string/st_log_share" app:summary="@string/st_log_share_sum" app:iconSpaceReserved="false" />
+        <Preference app:key="log_clear" app:title="@string/st_log_clear" app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+</PreferenceScreen>

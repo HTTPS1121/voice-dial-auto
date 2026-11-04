@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Material 3 button template (inflated per action). Height 64dp (8dp grid), large label. -->
+<com.google.android.material.button.MaterialButton xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    style="@style/Widget.Material3.Button"
+    android:layout_width="match_parent"
+    android:layout_height="64dp"
+    android:layout_marginTop="8dp"
+    android:textAppearance="?attr/textAppearanceTitleMedium"
+    app:iconGravity="textStart"
+    app:iconPadding="8dp"
+    app:iconSize="24dp" />
