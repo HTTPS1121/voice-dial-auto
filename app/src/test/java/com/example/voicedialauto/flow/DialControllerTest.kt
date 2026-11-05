@@ -23,7 +23,8 @@ class DialControllerTest {
             this.options += options
             starts++; lastLang = languageTag; this.listener = listener; all += listener
             active++; maxConcurrent = maxOf(maxConcurrent, active)
-            stormError?.let { e -> active--; this.listener = null; listener.onError(e) }
+            stormError?.let { e -> active--; this.listener = null; listener.onError(e); return }
+            listener.onListening()
         }
         override fun cancel() { if (listener != null) active--; listener = null }
         fun say(vararg h: String) { val l = listener!!; listener = null; active--; l.onResults(h.toList()) }
@@ -292,9 +293,22 @@ class DialControllerTest {
         val sp = FakeSpeaker()
         val c = controller(sp); c.onVisible(); speech.say("תתקשר לדנה")
         speech.partial("שתיים")
-        assertTrue(!sp.speaking); assertTrue(speech.listening)
-        speech.say("שתיים")
         assertTrue(c.state is DialState.Confirm)
+        assertTrue(sp.spoken.first().startsWith("נמצאו"))
+        assertTrue(sp.spoken.last().startsWith("picked "))
+    }
+
+    @Test fun spokenNumberOnPartialPicksImmediately() {
+        val c = controller(); c.onVisible(); speech.say("תתקשר לדנה")
+        val items = (c.state as DialState.Choosing).items
+        speech.partial("שתיים")
+        assertEquals(items[1], (c.state as DialState.Confirm).entry)
+    }
+
+    @Test fun spokenNameOnPartialPicksImmediately() {
+        val c = controller(); c.onVisible(); speech.say("תתקשר לדנה")
+        speech.partial("דנה כהן")
+        assertEquals("דנה כהן", (c.state as DialState.Confirm).entry.displayName)
     }
 
     /** Our own prompt heard by the mic must neither stop the prompt nor pick a row. */
@@ -632,7 +646,8 @@ class DialControllerTest {
         val c = controller(sp); toList(c)
         speech.partial("…")
         assertTrue(sp.speaking) // no barge-in on punctuation noise
-        speech.partial("שתיים"); assertTrue(!sp.speaking)
+        speech.partial("שתיים")
+        assertTrue(c.state is DialState.Confirm)
     }
 
     // ---------------------------------------------------------------- v11: first name only, async match, no reload
@@ -863,11 +878,12 @@ class DialControllerTest {
     @Test fun echoPartialDoesNotBargeInButDriverRemainderDoes() {
         val sp = FakeSpeaker()
         val c = controller(sp); c.onVisible(); speech.say("תתקשר לדנה")
+        val items = (c.state as DialState.Choosing).items
         speech.partial("נמצאו כמה שמ")
         assertTrue(sp.speaking)
         speech.partial("נמצאו כמה שמות שתיים")
-        assertTrue(!sp.speaking)
-        assertEquals("שתיים", (c.state as DialState.Choosing).partial)
+        assertEquals(items[1], (c.state as DialState.Confirm).entry)
+        assertTrue(sp.spoken.last().startsWith("picked "))
     }
 
     // ---------------------------------------------------------------- v15b: names on the list, continuation

@@ -512,15 +512,22 @@ class DialController(
     // ------------------------------------------------------------------ list / choice
 
     /**
-     * v9/v12: the mic opens IMMEDIATELY when the list appears, and the prompt "נמצאו כמה שמות, נא
-     * להגיד את מספר התוצאה הרצוי" is ALWAYS spoken over the open mic (barge-in: a partial that is
-     * not just our own prompt stops it; a final that is the prompt's echo is ignored).
+     * v9/v12: the mic opens IMMEDIATELY when the list appears. The prompt is spoken only after
+     * the recognizer is actually ready (onListening) so TTS audio-focus doesn't kill the session
+     * before the first partial. Barge-in still stops it; a final that is the prompt's echo is ignored.
      */
+    private var listPromptPending = false
     private fun enterChoosing(items: List<ContactEntry>) {
+        listPromptPending = true
         listenChoice(items)
+    }
+    private fun maybeSpeakListPrompt() {
+        if (!listPromptPending) return
+        listPromptPending = false
         val p = prompts ?: return
         val sp = speaker ?: return
-        val text = p.multiple(items.size)
+        val n = (state as? DialState.Choosing)?.items?.size ?: return
+        val text = p.multiple(n)
         if (text.isBlank()) return
         promptText = text
         promptSpeaking = true
@@ -582,11 +589,17 @@ class DialController(
         recognizerStarts++
         val opts = ListenOptions(continuous = true, maxSessionMs = (windowEnd - scheduler.now()).coerceAtLeast(0))
         speech.start(languages.primaryLanguage, sessionListener(my, object : SpeechListener {
+            override fun onListening() { maybeSpeakListPrompt() }
             override fun onPartial(text: String) {
                 // v15: a partial that is (a fuzzy prefix of) our prompt is the echo — no barge-in, not
                 // "heard"; only the driver's remainder is shown.
                 val mine = stripEcho(text)
                 if (mine.any { it.isLetterOrDigit() }) { heardInSession = true; bargeIn() }
+                val early = ChoiceResolver.resolveEarly(listOf(mine), items, matcher)
+                if (early != null) {
+                    startCountdown(early, mine, prompts?.picked(early.displayName))
+                    return
+                }
                 val s = state as? DialState.Choosing ?: return
                 val shown = mine.ifBlank { null }
                 if (s.partial != shown) set(s.copy(partial = shown))
@@ -656,7 +669,7 @@ class DialController(
     /**
      * v12: every call goes through here (single match, spoken number, tapped row). Our own timer
      * places the call when the countdown ends (the car UI doesn't rely on Action.FLAG_DEFAULT);
-     * the only action offered is "בטל התקשרות"; hiding the app cancels it (onHidden).
+     * the actions are "חייג עכשיו" and "בטל התקשרות"; hiding the app cancels it (onHidden).
      */
     private fun startCountdown(entry: ContactEntry, heard: String?, prompt: String? = null) {
         stopAll()

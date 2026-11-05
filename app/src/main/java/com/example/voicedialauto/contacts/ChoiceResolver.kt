@@ -6,7 +6,12 @@ package com.example.voicedialauto.contacts
  * Priority: strong name match > spoken number (EN/HE) > weaker name match.
  */
 object ChoiceResolver {
-    fun resolve(hypotheses: List<String>, items: List<ContactEntry>, matcher: ContactMatcher = ContactMatcher()): ContactEntry? {
+    fun resolve(
+        hypotheses: List<String>,
+        items: List<ContactEntry>,
+        matcher: ContactMatcher = ContactMatcher(),
+        weak: Boolean = true,
+    ): ContactEntry? {
         fun bestByName(minScore: Double): ContactEntry? {
             for (h in hypotheses) {
                 val scored = items.map { it to matcher.scoreAgainst(h, it) }.sortedByDescending { it.second }
@@ -22,8 +27,19 @@ object ChoiceResolver {
             val n = SpokenNumberParser.parse(h) ?: continue
             if (n in 1..items.size) return items[n - 1]
         }
+        if (!weak) return null
         return bestByName(0.75)
     }
+
+    /**
+     * Partial-transcript pick: strong name or a spoken number. Skips the 0.75 weak pass so a
+     * half-spoken name doesn't grab the wrong row.
+     */
+    fun resolveEarly(
+        hypotheses: List<String>,
+        items: List<ContactEntry>,
+        matcher: ContactMatcher = ContactMatcher(),
+    ): ContactEntry? = resolve(hypotheses, items, matcher, weak = false)
 
     private const val TIE = 0.001
 

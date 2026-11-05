@@ -17,4 +17,9 @@ class ChoiceResolverTest {
     }
     @Test fun names() { assertEquals(2L, r("Dana Levi")); assertEquals(1L, r("דנה כהן")) }
     @Test fun outOfRange() = assertNull(r("חמש"))
+    @Test fun earlySkipsWeakName() {
+        assertEquals(1L, ChoiceResolver.resolveEarly(listOf("דנה כהן"), items)?.contactId)
+        assertEquals(2L, ChoiceResolver.resolveEarly(listOf("שתיים"), items)?.contactId)
+        assertNull(ChoiceResolver.resolveEarly(listOf("דנה"), items))
+    }
 }
