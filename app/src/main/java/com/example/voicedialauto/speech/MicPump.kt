@@ -5,7 +5,6 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.media.AudioFocusRequest
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
@@ -142,12 +141,8 @@ class MicPump private constructor(
         private var rec: AudioRecord? = null
         private var aec: AcousticEchoCanceler? = null
         private var ns: NoiseSuppressor? = null
-        private var focus: AudioFocusRequest? = null
         @SuppressLint("MissingPermission") // checked in create()
         override fun start() {
-            if (duckMedia) {
-                focus = NavDuck.hold(context)
-            }
             val min = AudioRecord.getMinBufferSize(VadEngine.SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
             // v15: VOICE_COMMUNICATION gets AEC/NS in the capture path (TTS is the far end).
             // In the car it also flips MODE_IN_COMMUNICATION and pauses media — skip it when ducking.
@@ -174,34 +169,25 @@ class MicPump private constructor(
         override fun read(buf: ByteArray): Int = rec?.read(buf, 0, buf.size) ?: -1
         override fun stop() {
             rec?.let { runCatching { it.stop() } }
-            NavDuck.release(context, focus)
-            focus = null
         }
         override fun release() {
             rec?.let { runCatching { it.release() } }
             rec = null
             aec?.release(); aec = null; ns?.release(); ns = null
-            NavDuck.release(context, focus)
-            focus = null
         }
     }
 
     private class CarMic(private val carContext: CarContext) : Source {
         override val label = "car"
         private var record: CarAudioRecord? = null
-        private var focus: AudioFocusRequest? = null
         @SuppressLint("MissingPermission") // checked in car()
         override fun start() {
             val rec = CarAudioRecord.create(carContext).also { record = it }
-            // Waze-style duck, not EXCLUSIVE — exclusive paused media completely.
-            focus = NavDuck.hold(carContext)
             rec.startRecording()
         }
         override fun read(buf: ByteArray): Int = record?.read(buf, 0, buf.size) ?: -1
         override fun stop() {
             runCatching { record?.stopRecording() }
-            NavDuck.release(carContext, focus)
-            focus = null
         }
     }
 

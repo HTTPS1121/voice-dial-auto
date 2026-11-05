@@ -80,6 +80,8 @@ class VoiceRecognizer(
             listener.onError(RecognitionError.NOT_AVAILABLE)
             return
         }
+        // Duck immediately — not after VAD load / AudioRecord / StartGate. AA ducks late if we wait.
+        ensureDuck()
         val carMicPossible = useCarMic && carContext != null && MicPump.carMicSupported(carContext)
         // v15: give the recognizer service / CarAudioRecord a moment after a car-mic session or a
         // cancel (error 11 within ~30 ms otherwise). Everything of the old session is released now.
@@ -114,6 +116,7 @@ class VoiceRecognizer(
         transientAttempt: Int = 0,
     ) {
         destroyPending()
+        ensureDuck()
         val mySession = ++sessionId
         active = true
         main.removeCallbacks(dropWarm)
@@ -200,11 +203,6 @@ class VoiceRecognizer(
         }
         val usingCarMic = pump?.label == "car"
         val usingPump = pump != null
-        // No own capture: still duck like Waze so SpeechRecognizer doesn't pause media.
-        if (source == "car" && !usingPump && duck == null) {
-            duck = NavDuck.hold(context)
-            FileLog.log("audio", "nav-duck (no own capture)", source)
-        }
         val vadName = pump?.vadName ?: "none"
         val vadOn = usingPump && vadName != "none"
         run {
@@ -546,6 +544,12 @@ class VoiceRecognizer(
         SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED, SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE ->
             RecognitionError.LANGUAGE
         else -> RecognitionError.OTHER
+    }
+
+    private fun ensureDuck() {
+        if (source != "car" || duck != null) return
+        duck = NavDuck.hold(context)
+        FileLog.log("audio", "nav-duck", source)
     }
 
     /** Ends the current session. [keepWarm]: park the (idle) instance for an immediate restart. */
