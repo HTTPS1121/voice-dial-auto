@@ -9,6 +9,7 @@ import androidx.car.app.model.MessageTemplate
 import androidx.car.app.model.ParkedOnlyOnClickListener
 import androidx.car.app.model.Template
 import com.example.voicedialauto.R
+import com.example.voicedialauto.car.CarUi.bidi
 import com.example.voicedialauto.car.CarUi.header
 import com.example.voicedialauto.contacts.ContactsCache
 import com.example.voicedialauto.contacts.ScoredContact
@@ -92,11 +93,11 @@ class VoiceDialScreen(carContext: CarContext, private val controller: DialContro
                 com.example.voicedialauto.flow.FlowTimeline.mark("shown", android.os.SystemClock.elapsedRealtime())
             else -> Unit
         }
-        val title = carContext.getString(R.string.car_title)
+        val title = bidi(carContext, carContext.getString(R.string.car_title))
         val mic = CarUi.iconAction(carContext, R.drawable.ic_mic) { controller.recognizeAgain() }
         return when (val s = controller.state) {
             is DialState.NeedsPermissions -> MessageTemplate.Builder(
-                carContext.getString(R.string.car_permissions_needed),
+                bidi(carContext, carContext.getString(R.string.car_permissions_needed)),
             ).header(carContext, title, null)
                 .addAction(
                     Action.Builder()
@@ -120,7 +121,7 @@ class VoiceDialScreen(carContext: CarContext, private val controller: DialContro
                     }
                     append('\n').append(carContext.getString(R.string.car_contacts_count, ContactsCache.count))
                 }
-                MessageTemplate.Builder(msg).header(carContext, title, null)
+                MessageTemplate.Builder(bidi(carContext, msg)).header(carContext, title, null)
                     .setIcon(CarUi.icon(carContext, R.drawable.ic_mic))
                     .addAction(primary(R.string.car_recognize) { controller.recognizeAgain() })
                     .addAction(secondary(R.string.car_sync) { syncContacts() })
@@ -141,19 +142,19 @@ class VoiceDialScreen(carContext: CarContext, private val controller: DialContro
             // Message text is stable (name only). Seconds live on the Cancel button = refresh, not a
             // new task step. Call now skips the timer. No Action.FLAG_DEFAULT.
             is DialState.Confirm -> {
-                MessageTemplate.Builder(carContext.getString(R.string.car_confirm_wait, s.entry.displayName))
+                MessageTemplate.Builder(bidi(carContext, carContext.getString(R.string.car_confirm_wait, s.entry.displayName)))
                     .header(carContext, title, null)
                     .setIcon(CarUi.icon(carContext, R.drawable.ic_call, CarColor.GREEN))
                     .addAction(
                         Action.Builder()
-                            .setTitle(carContext.getString(R.string.car_call_now))
+                            .setTitle(bidi(carContext, carContext.getString(R.string.car_call_now)))
                             .setBackgroundColor(CarColor.GREEN)
                             .setOnClickListener { controller.callNow() }
                             .build(),
                     )
                     .addAction(
                         Action.Builder()
-                            .setTitle(carContext.getString(R.string.car_cancel_call_secs, s.secondsLeft))
+                            .setTitle(bidi(carContext, carContext.getString(R.string.car_cancel_call_secs, s.secondsLeft)))
                             .setBackgroundColor(CarColor.RED)
                             .setOnClickListener { controller.cancel() }
                             .build(),
@@ -162,14 +163,14 @@ class VoiceDialScreen(carContext: CarContext, private val controller: DialContro
             }
 
             is DialState.Calling ->
-                MessageTemplate.Builder(carContext.getString(R.string.car_calling, s.entry.displayName))
+                MessageTemplate.Builder(bidi(carContext, carContext.getString(R.string.car_calling, s.entry.displayName)))
                     .header(carContext, title, mic)
                     .setIcon(CarUi.icon(carContext, R.drawable.ic_call, CarColor.GREEN))
                     .build()
 
             // v12: one message, one primary action; diagnostics live only in the debug log.
             is DialState.NoMatch ->
-                MessageTemplate.Builder(carContext.getString(R.string.car_no_match_simple))
+                MessageTemplate.Builder(bidi(carContext, carContext.getString(R.string.car_no_match_simple)))
                     .header(carContext, title, null)
                     .setIcon(CarUi.icon(carContext, R.drawable.ic_mic_off))
                     .addAction(primary(R.string.car_listen_again) { controller.recognizeAgain() })
@@ -188,7 +189,7 @@ class VoiceDialScreen(carContext: CarContext, private val controller: DialContro
                     DialError.OTHER -> carContext.getString(R.string.car_err_other)
                 }
                 if (s.error == DialError.NO_CONTACTS) {
-                    MessageTemplate.Builder(text).header(carContext, title, null)
+                    MessageTemplate.Builder(bidi(carContext, text)).header(carContext, title, null)
                         .addAction(primary(R.string.car_sync) { syncContacts() })
                         .addAction(secondary(R.string.car_recognize_again) { controller.recognizeAgain() })
                         .build()
@@ -203,16 +204,15 @@ class VoiceDialScreen(carContext: CarContext, private val controller: DialContro
                 }
             }
 
-            is DialState.Choosing -> MessageTemplate.Builder(carContext.getString(R.string.car_on_list))
+            is DialState.Choosing -> MessageTemplate.Builder(bidi(carContext, carContext.getString(R.string.car_on_list)))
                 .header(carContext, title, mic).build()
         }
     }
 
     private fun listeningTemplate(title: String, lang: String, live: String?): Template {
-        val b = MessageTemplate.Builder(carContext.getString(R.string.car_listening_lang, langLabel(lang)))
+        val b = MessageTemplate.Builder(bidi(carContext, carContext.getString(R.string.car_listening_lang, langLabel(lang))))
             .header(carContext, title, null)
             .setIcon(CarUi.icon(carContext, R.drawable.ic_mic, CarColor.RED))
-        // Live transcript as a button label (tap = start over). Buttons may change without a new step.
         if (live != null) b.addAction(secondary(live) { controller.recognizeAgain() })
         b.addAction(secondary(R.string.car_cancel) { controller.cancel() })
         return b.build()
@@ -242,7 +242,7 @@ class VoiceDialScreen(carContext: CarContext, private val controller: DialContro
     }
 
     private fun retryMessage(title: String, text: String, otherLanguage: Boolean): Template {
-        val b = MessageTemplate.Builder(text).header(carContext, title, null)
+        val b = MessageTemplate.Builder(bidi(carContext, text)).header(carContext, title, null)
             .addAction(primary(R.string.car_recognize_again) { controller.recognizeAgain() })
         if (otherLanguage) {
             val lang = if (prefs.secondaryLanguage == Prefs.LANG_EN) R.string.car_try_en else R.string.car_try_he

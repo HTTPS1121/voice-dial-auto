@@ -10,7 +10,9 @@ import androidx.car.app.model.ListTemplate
 import androidx.car.app.model.Row
 import androidx.car.app.model.Template
 import com.example.voicedialauto.R
+import com.example.voicedialauto.car.CarUi.bidi
 import com.example.voicedialauto.car.CarUi.header
+import com.example.voicedialauto.car.CarUi.numberedTitle
 import com.example.voicedialauto.contacts.ContactEntry
 import com.example.voicedialauto.flow.DialController
 import com.example.voicedialauto.flow.DialState
@@ -19,7 +21,7 @@ import com.example.voicedialauto.util.Prefs
 
 /**
  * Numbered ListTemplate for (a) several matches and (b) "did you mean" suggestions.
- * Header mic shows the mic state (red = listening, off = tap to listen). v9: the mic opens the
+ * Header mic shows listening vs off. v9: the mic opens the
  * moment the list appears and stays red for the whole list window (restarts included); the
  * optional short TTS prompt plays over the open mic (barge-in).
  * Row tap = call immediately. Spoken number/name → countdown from Settings (default 3.5 s, 0 = none) (handled by DialController).
@@ -42,7 +44,9 @@ class ContactListScreen(carContext: CarContext, private val controller: DialCont
      * restarts / partials arrive, so mic icon changes are refreshes (no task step), and repeated
      * restarts don't redraw at all.
      */
-    fun refresh() { if (key(controller.state) != drawnKey) throttle.request() }
+    fun refresh() {
+        if (key(controller.state) != drawnKey) throttle.request()
+    }
 
     private fun key(s: DialState): String = when (s) {
         is DialState.Choosing -> "CH|${s.items.joinToString(",") { "${it.contactId}:${it.number}" }}|${s.mic}"
@@ -60,20 +64,20 @@ class ContactListScreen(carContext: CarContext, private val controller: DialCont
         is DialState.Choosing -> choosing(s)
         is DialState.NoMatch -> suggestions(s)
         // Transitional (we are about to be popped).
-        else -> ListTemplate.Builder().header(carContext, carContext.getString(R.string.car_title), null)
+        else -> ListTemplate.Builder().header(carContext, bidi(carContext, carContext.getString(R.string.car_title)), null)
             .setLoading(true).build()
     }
 
     private fun choosing(s: DialState.Choosing): Template {
         val list = ItemList.Builder()
-        s.items.forEachIndexed { i, c -> list.addItem(row("${i + 1}. ${c.displayName}", c) { controller.pick(c) }) }
+        s.items.forEachIndexed { i, c -> list.addItem(row(numberedTitle(carContext, i + 1, c.displayName), c) { controller.pick(c) }) }
         val mic = when (s.mic) {
             MicState.LISTENING -> CarUi.iconAction(carContext, R.drawable.ic_mic, CarColor.RED) { controller.micPressed() }
             MicState.SPEAKING -> CarUi.iconAction(carContext, R.drawable.ic_volume) { controller.micPressed() }
             MicState.OFF -> CarUi.iconAction(carContext, R.drawable.ic_mic_off) { controller.micPressed() }
         }
         return ListTemplate.Builder()
-            .header(carContext, carContext.getString(R.string.car_choose_title), mic)
+            .header(carContext, bidi(carContext, carContext.getString(R.string.car_choose_title)), mic)
             .setSingleList(list.build())
             .build()
     }
@@ -92,7 +96,7 @@ class ContactListScreen(carContext: CarContext, private val controller: DialCont
             val title = if (sc.score > 0) {
                 carContext.getString(R.string.car_top_line, sc.contact.displayName, sc.score)
             } else sc.contact.displayName
-            list.addItem(row(title, sc.contact) { controller.pick(sc.contact) })
+            list.addItem(row(bidi(carContext, title), sc.contact) { controller.pick(sc.contact) })
         }
         list.addItem(
             Row.Builder().setTitle(carContext.getString(R.string.car_recognize_again))
@@ -120,7 +124,7 @@ class ContactListScreen(carContext: CarContext, private val controller: DialCont
         val header = carContext.getString(R.string.car_did_you_mean) + " · " +
             carContext.getString(R.string.car_contacts_count, s.contactsCount)
         return ListTemplate.Builder()
-            .header(carContext, header, mic)
+            .header(carContext, bidi(carContext, header), mic)
             .setSingleList(list.build())
             .build()
     }

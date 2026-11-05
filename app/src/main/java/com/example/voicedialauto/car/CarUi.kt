@@ -1,5 +1,6 @@
 package com.example.voicedialauto.car
 
+import android.view.View
 import androidx.car.app.CarContext
 import androidx.car.app.model.Action
 import androidx.car.app.model.ActionStrip
@@ -13,6 +14,16 @@ import androidx.core.graphics.drawable.IconCompat
 
 /** Small helpers so screens can use the Header API on Car API 7+ and the deprecated setters below. */
 internal object CarUi {
+    fun isRtl(ctx: CarContext): Boolean =
+        ctx.resources.configuration.layoutDirection == View.LAYOUT_DIRECTION_RTL
+
+    /** Force a Hebrew/RTL run so the AA host doesn't LTR-align the string. */
+    fun bidi(ctx: CarContext, text: String): String =
+        if (isRtl(ctx)) "\u200F$text" else text
+
+    fun numberedTitle(ctx: CarContext, index: Int, name: String): String =
+        bidi(ctx, "$index. $name")
+
     fun icon(ctx: CarContext, res: Int, tint: CarColor? = null): CarIcon =
         CarIcon.Builder(IconCompat.createWithResource(ctx, res)).apply { tint?.let { setTint(it) } }.build()
 
