@@ -114,15 +114,59 @@ The duck stays down from the first listen, through the list and the countdown, u
 
 ## Install on a real car
 
-Android Auto only shows Car App Library apps that look like they came from **Play**. A plain `adb install` is not enough.
+Android Auto only shows Car App Library apps that look like they came from **Play**. A GitHub APK / `adb install` is not enough — the installer must be `com.android.vending` and the initiator the system package installer (or Play). Voice Dial does that with Shizuku (no root): it opens the package installer **as shell**, with Play as the installer name. Same signature → in-place update, no uninstall.
 
-1. Install the APK on the phone (same package as before — it updates in place).
-2. Grant **microphone**, **contacts**, **phone**.
-3. Install [Shizuku](https://github.com/RikkaApps/Shizuku) (or Shizuku-Next), start it via wireless debugging.
-4. Voice Dial → ⚙️ → **Show in Android Auto** → **Reinstall as Play (Shizuku)**.
-5. Status must be **green**. Force-stop Android Auto, replug the car.
+### 1. Install Voice Dial
 
-Without Shizuku: copy the `adb` command from that settings screen (USB).
+Download [**VoiceDial-0.16-v16.apk**](https://github.com/HTTPS1121/voice-dial-auto/releases/latest) → open on the phone (unknown sources) → grant **microphone**, **contacts**, **phone**.
+
+### 2. Install Shizuku
+
+Same package either way (`moe.shizuku.privileged.api`). This app’s own button opens **Shizuku-Next**.
+
+<p>
+  <a href="https://github.com/rushiranpise/Shizuku-Next/releases/latest/download/shizuku-v14.0.33-next.apk"><img src="https://img.shields.io/badge/Download-Shizuku--Next%20APK-2ea44f?style=for-the-badge" alt="Download Shizuku-Next APK" /></a>
+  <a href="https://play.google.com/store/apps/details?id=moe.shizuku.privileged.api"><img src="https://img.shields.io/badge/Play-Official%20Shizuku-414141?style=for-the-badge&logo=googleplay&logoColor=white" alt="Shizuku on Google Play" /></a>
+</p>
+
+- **Direct APK (Shizuku-Next, what we use):** [shizuku-v14.0.33-next.apk](https://github.com/rushiranpise/Shizuku-Next/releases/latest/download/shizuku-v14.0.33-next.apk) — take the file **without** `-debug` in the name. If that link 404s, grab the latest non-debug APK from [Releases](https://github.com/rushiranpise/Shizuku-Next/releases/latest).
+- **Play (official Shizuku):** [install from Google Play](https://play.google.com/store/apps/details?id=moe.shizuku.privileged.api)
+
+### 3. Start Shizuku (wireless debugging)
+
+Do this on the **phone**. Shizuku must show as **running** before the next step. After a reboot, start it again.
+
+1. Enable developer options: **Settings > About phone** → tap **Build number** 7 times.
+2. **Settings > System > Developer options** (Samsung: **Settings > Developer options**).
+3. Turn on **USB debugging**.
+4. Turn on **Wireless debugging**.
+5. Open **Shizuku**.
+6. Tap **Start via wireless debugging** (Hebrew UI: **הפעלה באמצעות שידור אלחוטי**).
+7. If it asks to pair: **Developer options > Wireless debugging > Pair device with pairing code**. Enter the 6-digit code in Shizuku (Shizuku-Next can tap this for you).
+8. Shizuku home must say it is **running**. Leave it in the background.
+
+USB instead of wireless: plug into a PC with `adb`, then in Shizuku use start via USB / ADB.
+
+### 4. Reinstall Voice Dial as Play
+
+1. Open **Voice Dial** on the phone.
+2. Tap the **gear**.
+3. **הצגה ב-Android Auto** / **Show in Android Auto**.
+4. Tap **התקן מחדש כ-Play (Shizuku)** / **Reinstall as Play (Shizuku)**.
+5. First time: Shizuku permission dialog → **Allow**. Tap the button again.
+6. The system package installer opens. Confirm the **update** (same app, not a wipe).
+7. Back in Voice Dial, **סטטוס מקור ההתקנה** / **Install source status** must be **green**:
+   - installer = Play (`com.android.vending`)
+   - initiator = package installer or Play
+8. Force-stop **Android Auto**, unplug and replug the car. Voice Dial should appear on the launcher.
+
+If Shizuku is not running, Voice Dial shows **צריך את Shizuku** and the same download link as above.
+
+### No Shizuku (USB PC)
+
+In that same settings screen: **העתק פקודת adb (גיבוי)** / **Copy adb command**. Run it on a PC with USB. Confirm the install on the phone, then check that the status is green.
+
+> A normal APK install (GitHub file, Files app, `adb install` without that command) **resets** Play registration. Run *Reinstall as Play* again. Updating **through that button** keeps it.
 
 > **DHU** (Desktop Head Unit) shows sideloaded apps. A real head unit usually does not, until Play registration is green.
 >
@@ -249,15 +293,59 @@ Phone UI and car UI only **render** `DialState`. Behavior lives in `DialControll
 
 ## התקנה ברכב אמיתי
 
-אנדרואיד אוטו מציג אפליקציות Car App Library רק אם נראה שהן הגיעו מ-**Play**. `adb install` רגיל לא מספיק.
+אנדרואיד אוטו מציג אפליקציות Car App Library רק אם נראה שהן הגיעו מ-**Play**. APK מ-GitHub / `adb install` לא מספיק — המתקין חייב להיות `com.android.vending` והיוזם מתקין החבילות (או Play). חיוג קולי עושה את זה עם Shizuku (בלי root): פותח את מתקין החבילות **כ-shell**, עם Play כשם המתקין. אותה חתימה > עדכון במקום, בלי הסרה.
 
-1. מתקינים את ה-APK בטלפון (אותה חבילה > מתעדכן במקום).
-2. מאשרים **מיקרופון**, **אנשי קשר**, **טלפון**.
-3. מתקינים [Shizuku](https://github.com/RikkaApps/Shizuku) (או Shizuku-Next), מפעילים דרך ניפוי באגים אלחוטי.
-4. חיוג קולי > גלגל שיניים > **הצגה ב-Android Auto** > **התקן מחדש כ-Play (Shizuku)**.
-5. הסטטוס חייב להיות **ירוק**. Force-stop ל-Android Auto, מנתקים וחוברים לרכב.
+### 1. מתקינים את חיוג קולי
 
-בלי Shizuku: מעתיקים את פקודת ה-`adb` מאותו מסך הגדרות (USB).
+מורידים [**VoiceDial-0.16-v16.apk**](https://github.com/HTTPS1121/voice-dial-auto/releases/latest) > פותחים בטלפון (מקור לא ידוע) > מאשרים **מיקרופון**, **אנשי קשר**, **טלפון**.
+
+### 2. מתקינים Shizuku
+
+אותה חבילה בשני המסלולים (`moe.shizuku.privileged.api`). הכפתור באפליקציה פותח **Shizuku-Next**.
+
+<p>
+  <a href="https://github.com/rushiranpise/Shizuku-Next/releases/latest/download/shizuku-v14.0.33-next.apk"><img src="https://img.shields.io/badge/הורדה-Shizuku--Next%20APK-2ea44f?style=for-the-badge" alt="הורדת Shizuku-Next" /></a>
+  <a href="https://play.google.com/store/apps/details?id=moe.shizuku.privileged.api"><img src="https://img.shields.io/badge/Play-Shizuku%20הרשמי-414141?style=for-the-badge&logo=googleplay&logoColor=white" alt="Shizuku ב-Google Play" /></a>
+</p>
+
+- **APK ישיר (Shizuku-Next, מה שאנחנו משתמשים בו):** [shizuku-v14.0.33-next.apk](https://github.com/rushiranpise/Shizuku-Next/releases/latest/download/shizuku-v14.0.33-next.apk) — הקובץ **בלי** `-debug` בשם. אם הלינק 404, לוקחים את ה-APK הלא-דיבאג האחרון מ-[Releases](https://github.com/rushiranpise/Shizuku-Next/releases/latest).
+- **Play (Shizuku הרשמי):** [התקנה מ-Google Play](https://play.google.com/store/apps/details?id=moe.shizuku.privileged.api)
+
+### 3. מפעילים את Shizuku (ניפוי באגים אלחוטי)
+
+הכל **בטלפון**. Shizuku חייב להיות **פעיל** לפני השלב הבא. אחרי ריסטארט מפעילים אותו שוב.
+
+1. אפשרויות למפתחים: **הגדרות > אודות הטלפון** > לחיצה 7 פעמים על **מספר בניה**.
+2. **הגדרות > מערכת > אפשרויות למפתחים** (סמסונג: **הגדרות > אפשרויות למפתחים**).
+3. מדליקים **ניפוי באגים ב-USB**.
+4. מדליקים **ניפוי באגים אלחוטי**.
+5. פותחים את **Shizuku**.
+6. לוחצים **הפעלה באמצעות שידור אלחוטי** (אנגלית: **Start via wireless debugging**).
+7. אם מבקש צימוד: **אפשרויות למפתחים > ניפוי באגים אלחוטי > צימוד מכשיר עם קוד**. מזינים ב-Shizuku את 6 הספרות (Shizuku-Next יודע לפעמים ללחוץ את זה לבד).
+8. במסך הבית של Shizuku חייב להיות כתוב שהוא **רץ**. משאירים ברקע.
+
+במקום אלחוטי: USB למחשב עם `adb`, וב-Shizuku הפעלה דרך USB / ADB.
+
+### 4. מתקינים מחדש את חיוג קולי כ-Play
+
+1. פותחים **חיוג קולי** בטלפון.
+2. לוחצים על **גלגל השיניים**.
+3. **הצגה ב-Android Auto**.
+4. **התקן מחדש כ-Play (Shizuku)**.
+5. בפעם הראשונה: דיאלוג הרשאה של Shizuku > **אשר**. לוחצים שוב על הכפתור.
+6. נפתח מתקין החבילות של המערכת. מאשרים את ה**עדכון** (אותה אפליקציה, לא מוחקים).
+7. חוזרים לחיוג קולי. **סטטוס מקור ההתקנה** חייב להיות **ירוק**:
+   - מתקין = Play (`com.android.vending`)
+   - יוזם = מתקין חבילות או Play
+8. Force-stop ל-**Android Auto**, מנתקים וחוברים לרכב. חיוג קולי אמור להופיע במשגר.
+
+אם Shizuku לא רץ, האפליקציה מציגה **צריך את Shizuku** ואת אותו לינק הורדה.
+
+### בלי Shizuku (מחשב ב-USB)
+
+באותו מסך הגדרות: **העתק פקודת adb (גיבוי)**. מריצים במחשב עם USB. מאשרים התקנה בטלפון, ואז בודקים שהסטטוס ירוק.
+
+> התקנת APK רגילה (קובץ מ-GitHub, קבצים, `adb install` בלי הפקודה הזו) **מאפסת** את הרישום כ-Play. מריצים שוב *התקן מחדש כ-Play*. עדכון **דרך הכפתור** שומר עליו.
 
 > **DHU** מציג אפליקציות שהותקנו ידנית. ראש יחידה אמיתי בדרך כלל לא, עד שהרישום כ-Play ירוק.
 >
