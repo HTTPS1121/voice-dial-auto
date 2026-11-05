@@ -100,6 +100,46 @@ class Prefs(context: Context) : LanguageSource, TimingSource {
         get() = sp.getBoolean(KEY_SEGMENTED, true)
         set(v) = sp.edit().putBoolean(KEY_SEGMENTED, v).apply()
 
+    /**
+     * v16: Theme mode ("system", "light", "dark") and Material You dynamic colors (Android 12+).
+     */
+    var themeMode: String
+        get() = sp.getString(KEY_THEME_MODE, THEME_SYSTEM) ?: THEME_SYSTEM
+        set(v) = sp.edit().putString(KEY_THEME_MODE, v).apply()
+
+    var dynamicColors: Boolean
+        get() = sp.getBoolean(KEY_DYNAMIC_COLORS, true)
+        set(v) = sp.edit().putBoolean(KEY_DYNAMIC_COLORS, v).apply()
+
+    var nameWindowSeconds: Int
+        get() = sp.getInt(KEY_NAME_WINDOW_S, NAME_WINDOW_DEFAULT_S).coerceIn(NAME_WINDOW_MIN_S, NAME_WINDOW_MAX_S)
+        set(v) = sp.edit().putInt(KEY_NAME_WINDOW_S, v.coerceIn(NAME_WINDOW_MIN_S, NAME_WINDOW_MAX_S)).apply()
+
+    var listWindowSeconds: Int
+        get() = sp.getInt(KEY_LIST_WINDOW_S, LIST_WINDOW_DEFAULT_S).coerceIn(LIST_WINDOW_MIN_S, LIST_WINDOW_MAX_S)
+        set(v) = sp.edit().putInt(KEY_LIST_WINDOW_S, v.coerceIn(LIST_WINDOW_MIN_S, LIST_WINDOW_MAX_S)).apply()
+
+    var countdownHalfSeconds: Int
+        get() = sp.getInt(KEY_COUNTDOWN_HALF_S, COUNTDOWN_DEFAULT_HALF_S).coerceIn(0, COUNTDOWN_MAX_HALF_S)
+        set(v) = sp.edit().putInt(KEY_COUNTDOWN_HALF_S, v.coerceIn(0, COUNTDOWN_MAX_HALF_S)).apply()
+
+    var vadSensitivityKey: String
+        get() = sp.getString(KEY_VAD_SENSITIVITY, "normal") ?: "normal"
+        set(v) = sp.edit().putString(KEY_VAD_SENSITIVITY, v).apply()
+
+    var vadHangoverTenths: Int
+        get() = sp.getInt(KEY_VAD_HANGOVER_TENTHS, VAD_HANGOVER_DEFAULT_TENTHS)
+            .coerceIn(VAD_HANGOVER_MIN_TENTHS, VAD_HANGOVER_MAX_TENTHS)
+        set(v) = sp.edit().putInt(KEY_VAD_HANGOVER_TENTHS, v.coerceIn(VAD_HANGOVER_MIN_TENTHS, VAD_HANGOVER_MAX_TENTHS)).apply()
+
+    fun resetTimings() {
+        sp.edit()
+            .putInt(KEY_NAME_WINDOW_S, NAME_WINDOW_DEFAULT_S)
+            .putInt(KEY_LIST_WINDOW_S, LIST_WINDOW_DEFAULT_S)
+            .putInt(KEY_COUNTDOWN_HALF_S, COUNTDOWN_DEFAULT_HALF_S)
+            .apply()
+    }
+
     override val secondaryLanguage: String get() = if (primaryLanguage == LANG_HE) LANG_EN else LANG_HE
 
     override fun togglePrimaryLanguage() { primaryLanguage = secondaryLanguage }
@@ -107,6 +147,11 @@ class Prefs(context: Context) : LanguageSource, TimingSource {
     companion object {
         const val LANG_HE = "he-IL"
         const val LANG_EN = "en-US"
+        const val THEME_SYSTEM = "system"
+        const val THEME_LIGHT = "light"
+        const val THEME_DARK = "dark"
+        const val KEY_THEME_MODE = "theme_mode"
+        const val KEY_DYNAMIC_COLORS = "dynamic_colors"
         private const val KEY_LANG = "lang"
         private const val KEY_CAR_MIC = "car_mic"
         private const val KEY_ACTION_CALL = "action_call"
