@@ -64,9 +64,14 @@ class VoiceDialScreen(carContext: CarContext, private val controller: DialContro
     }
 
     private var rootKey: String? = null
+    /** False until the host has called [onGetTemplate] at least once. */
+    private var hostHasTemplate = false
     private val throttle = Throttle { if (renderKey(controller.state) != rootKey) invalidate() }
 
     private fun refreshRoot() {
+        // Session onStart + contacts-ready often fire listenName before the host asks for the
+        // first template. invalidate() in that window is the AA "unexpected error" flash on open.
+        if (!hostHasTemplate) return
         val key = renderKey(controller.state)
         if (key == rootKey) return
         // v11: a NEW kind of screen (e.g. Processing → countdown / no-match) is drawn at once;
@@ -87,6 +92,7 @@ class VoiceDialScreen(carContext: CarContext, private val controller: DialContro
     }
 
     override fun onGetTemplate(): Template {
+        hostHasTemplate = true
         rootKey = renderKey(controller.state)
         when (controller.state) {
             is DialState.Confirm, is DialState.Calling, is DialState.NoMatch, is DialState.Failed ->
