@@ -18,6 +18,9 @@ class DialControllerTest {
         var lastLang: String? = null
         /** If set, every start immediately fails with this error (error storm). */
         var stormError: RecognitionError? = null
+        var duckPinned = false
+        override fun pinDuck() { duckPinned = true }
+        override fun unpinDuck() { duckPinned = false }
         val options = mutableListOf<ListenOptions>()
         override fun start(languageTag: String, listener: SpeechListener, options: ListenOptions) {
             this.options += options
@@ -281,22 +284,22 @@ class DialControllerTest {
 
     // ---------------------------------------------------------------- v9: list without TTS gap
 
-    /** v12 (replaces listListensImmediatelyAndSilentlyByDefault + readAloudOnSpeaksShortPromptOverOpenMic). */
-    @Test fun listAlwaysSpeaksPromptWithMicAlreadyOpen() {
+    @Test fun listOpensMicWithoutSpeaking() {
         val sp = FakeSpeaker()
         val c = controller(sp); c.onVisible(); speech.say("תתקשר לדנה")
         assertEquals(MicState.LISTENING, (c.state as DialState.Choosing).mic)
-        assertTrue(speech.listening); assertTrue(sp.speaking)
-        assertEquals(listOf("נמצאו כמה שמות נא להגיד את מספר התוצאה הרצוי"), sp.spoken)
+        assertTrue(speech.listening); assertTrue(!sp.speaking)
+        assertTrue(sp.spoken.isEmpty())
+        assertTrue(speech.duckPinned)
     }
 
-    @Test fun bargeInSpeechStopsTts() {
+    @Test fun spokenNumberOnListPicksAndKeepsDuck() {
         val sp = FakeSpeaker()
         val c = controller(sp); c.onVisible(); speech.say("תתקשר לדנה")
         speech.partial("שתיים")
         assertTrue(c.state is DialState.Confirm)
-        assertTrue(sp.spoken.first().startsWith("נמצאו"))
-        assertTrue(sp.spoken.last().startsWith("picked "))
+        assertTrue(sp.spoken.single().startsWith("picked "))
+        assertTrue(speech.duckPinned)
     }
 
     @Test fun spokenNumberOnPartialPicksImmediately() {
@@ -312,13 +315,9 @@ class DialControllerTest {
         assertEquals("דנה כהן", (c.state as DialState.Confirm).entry.displayName)
     }
 
-    /** Our own prompt heard by the mic must neither stop the prompt nor pick a row. */
-    @Test fun ttsEchoIsIgnored() {
-        val sp = FakeSpeaker()
-        val c = controller(sp); c.onVisible(); speech.say("תתקשר לדנה")
-        speech.partial("נמצאו כמה שמות")
-        assertTrue("echo partial must not barge in", sp.speaking)
-        speech.say("נמצאו כמה שמות נא להגיד את מספר")
+    @Test fun unmatchedListSpeechKeepsMicOpen() {
+        val c = controller(); c.onVisible(); speech.say("תתקשר לדנה")
+        speech.say("בלה בלה")
         val s = c.state as DialState.Choosing
         assertEquals(MicState.LISTENING, s.mic); assertTrue(called.isEmpty())
         clock.advance(1_000); assertTrue(speech.listening)
@@ -656,7 +655,7 @@ class DialControllerTest {
         val sp = FakeSpeaker()
         val c = controller(sp); toList(c)
         speech.partial("…")
-        assertTrue(sp.speaking) // no barge-in on punctuation noise
+        assertTrue(!sp.speaking)
         speech.partial("שתיים")
         assertTrue(c.state is DialState.Confirm)
     }
@@ -886,12 +885,10 @@ class DialControllerTest {
         }
     }
 
-    @Test fun echoPartialDoesNotBargeInButDriverRemainderDoes() {
+    @Test fun numberInLongListUtteranceStillPicks() {
         val sp = FakeSpeaker()
         val c = controller(sp); c.onVisible(); speech.say("תתקשר לדנה")
         val items = (c.state as DialState.Choosing).items
-        speech.partial("נמצאו כמה שמ")
-        assertTrue(sp.speaking)
         speech.partial("נמצאו כמה שמות שתיים")
         assertEquals(items[1], (c.state as DialState.Confirm).entry)
         assertTrue(sp.spoken.last().startsWith("picked "))

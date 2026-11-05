@@ -153,6 +153,7 @@ class DialController(
     private fun commitHide() {
         hideCommitted = true
         stopAll()
+        dropDuck()
         when (val s = state) {
             is DialState.Confirm -> set(DialState.Idle())
             is DialState.Choosing -> set(s.copy(mic = MicState.OFF, partial = null))
@@ -169,6 +170,7 @@ class DialController(
         FlowLog.d("flow", "[$matchSource] interrupted (phone call / audio) in ${describe(state)}")
         holdAutoListen = true
         stopAll()
+        dropDuck()
         when (state) {
             is DialState.Calling, is DialState.NeedsPermissions, is DialState.Idle -> emit()
             else -> set(DialState.Idle(lastCalledName))
@@ -211,7 +213,7 @@ class DialController(
         if (state is DialState.Listening) listenName(languages.primaryLanguage) else emit()
     }
 
-    fun cancel() { FlowLog.d("flow", "cancel (state=${describe(state)})"); userAction(); stopAll(); set(DialState.Idle()) }
+    fun cancel() { FlowLog.d("flow", "cancel (state=${describe(state)})"); userAction(); stopAll(); dropDuck(); set(DialState.Idle()) }
 
     /** Big mic button / header mic action. */
     fun micPressed() {
@@ -251,11 +253,13 @@ class DialController(
 
     private fun listenName(lang: String, auto: Boolean = false) {
         hideTask?.cancel(); hideTask = null
+        hideCommitted = false
         stopAll()
         if (auto && !autoGuard.tryAcquire(scheduler.now())) {
             // Circuit breaker: too many automatic starts → wait for the user.
-            set(DialState.Idle(lastCalledName)); return
+            dropDuck(); set(DialState.Idle(lastCalledName)); return
         }
+        speech.pinDuck()
         beginWindow(nameWindowMs()) {
             if (state is DialState.Listening) { stopAll(); enterNoMatch(DialState.NoMatch("", emptyList())) }
         }
@@ -472,7 +476,7 @@ class DialController(
             if (list.isEmpty()) {
                 logAttempt(hypotheses, partialSnapshot, hypotheses.flatMap { QueryExtractor.candidates(it) }.distinct(),
                     0, "NO_CONTACTS", emptyList(), "cache_empty source=$matchSource")
-                set(DialState.Failed(DialError.NO_CONTACTS)); return@withContacts
+                dropDuck(); set(DialState.Failed(DialError.NO_CONTACTS)); return@withContacts
             }
             val timeline = FlowTimeline.current
             timeline.mark("matchStart", scheduler.now())
@@ -522,6 +526,7 @@ class DialController(
      * prompt. Suggestions/top candidates stay in the state for the debug log only.
      */
     private fun enterNoMatch(s: DialState.NoMatch) {
+        dropDuck()
         set(s)
         prompts?.let { say(it.noMatch(), it.languageTag) }
     }
@@ -536,28 +541,9 @@ class DialController(
 
     // ------------------------------------------------------------------ list / choice
 
-    /**
-     * v9/v12: the mic opens IMMEDIATELY when the list appears. The prompt is spoken only after
-     * the recognizer is actually ready (onListening) so TTS audio-focus doesn't kill the session
-     * before the first partial. Barge-in still stops it; a final that is the prompt's echo is ignored.
-     */
-    private var listPromptPending = false
+    /** Mic opens with the list. No TTS — duck stays from the name session so the driver can speak a number immediately. */
     private fun enterChoosing(items: List<ContactEntry>) {
-        listPromptPending = true
         listenChoice(items)
-    }
-    private fun maybeSpeakListPrompt() {
-        if (!listPromptPending) return
-        listPromptPending = false
-        val p = prompts ?: return
-        val sp = speaker ?: return
-        val n = (state as? DialState.Choosing)?.items?.size ?: return
-        val text = p.multiple(n)
-        if (text.isBlank()) return
-        promptText = text
-        promptSpeaking = true
-        FlowLog.d("tts", "[$matchSource] list prompt over open mic \"$text\"")
-        sp.speak(text, p.languageTag) { promptSpeaking = false }
     }
 
     /** Text of the short list prompt currently/last spoken (echo filter). */
@@ -598,6 +584,7 @@ class DialController(
     /** Opens a fresh listening window (Settings, default 30 s) on the list. */
     private fun listenChoice(items: List<ContactEntry>) {
         stopAll()
+        speech.pinDuck()
         beginWindow(choiceWindowMs()) {
             val s = state as? DialState.Choosing
             if (s != null && s.mic == MicState.LISTENING) { stopAll(); set(s.copy(mic = MicState.OFF, partial = null)) }
@@ -614,7 +601,6 @@ class DialController(
         recognizerStarts++
         val opts = ListenOptions(continuous = true, maxSessionMs = (windowEnd - scheduler.now()).coerceAtLeast(0))
         speech.start(languages.primaryLanguage, sessionListener(my, object : SpeechListener {
-            override fun onListening() { maybeSpeakListPrompt() }
             override fun onPartial(text: String) {
                 // v15: a partial that is (a fuzzy prefix of) our prompt is the echo — no barge-in, not
                 // "heard"; only the driver's remainder is shown.
@@ -698,6 +684,7 @@ class DialController(
      */
     private fun startCountdown(entry: ContactEntry, heard: String?, prompt: String? = null) {
         stopAll()
+        speech.pinDuck()
         val total = countdownMs()
         if (total <= 0) { call(entry); return }
         val my = ++token
@@ -727,7 +714,16 @@ class DialController(
         lastCallAt = scheduler.now()
         lastCalledName = entry.displayName
         set(DialState.Calling(entry))
-        if (!caller.call(entry)) set(DialState.Failed(DialError.CALL_FAILED, entry.displayName))
+        if (!caller.call(entry)) {
+            dropDuck()
+            set(DialState.Failed(DialError.CALL_FAILED, entry.displayName))
+            return
+        }
+        dropDuck()
+    }
+
+    private fun dropDuck() {
+        speech.unpinDuck()
     }
 
     // ------------------------------------------------------------------ helpers
@@ -756,6 +752,7 @@ class DialController(
     }
 
     private fun fail(error: RecognitionError) {
+        dropDuck()
         when (error) {
             RecognitionError.NO_PERMISSION -> {
                 val missing = permissions()

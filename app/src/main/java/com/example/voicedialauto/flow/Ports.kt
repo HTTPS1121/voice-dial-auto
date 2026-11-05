@@ -47,6 +47,9 @@ interface SpeechInput {
     fun start(languageTag: String, listener: SpeechListener, options: ListenOptions)
     /** Stops everything and releases the recognizer (including a kept-warm instance). */
     fun cancel()
+    /** Keep media ducked across recognizer/TTS hops (car). No-op on phone fakes. */
+    fun pinDuck() {}
+    fun unpinDuck() {}
 }
 
 interface ContactsSource {

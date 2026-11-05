@@ -66,6 +66,7 @@ class VoiceRecognizer(
     private val dropWarm = Runnable { releaseWarm() }
     private var pump: MicPump? = null
     private var duck: AudioFocusRequest? = null
+    private var duckPinned = false
     private var active = false
     private var sessionId = 0
 
@@ -552,14 +553,29 @@ class VoiceRecognizer(
         FileLog.log("audio", "nav-duck", source)
     }
 
+    override fun pinDuck() {
+        duckPinned = true
+        ensureDuck()
+    }
+
+    override fun unpinDuck() {
+        duckPinned = false
+        if (active) return
+        NavDuck.release(context, duck)
+        duck = null
+        FileLog.log("audio", "nav-unduck", source)
+    }
+
     /** Ends the current session. [keepWarm]: park the (idle) instance for an immediate restart. */
     private fun finish(keepWarm: Boolean = false) {
         active = false
         sessionId++
         if (pump?.label == "car") lastCarEndAt = SystemClock.elapsedRealtime()
         pump?.stop(); pump = null
-        NavDuck.release(context, duck)
-        duck = null
+        if (!duckPinned) {
+            NavDuck.release(context, duck)
+            duck = null
+        }
         recognizer?.let { r ->
             if (keepWarm) {
                 releaseWarm()
@@ -602,7 +618,7 @@ class VoiceRecognizer(
         releaseWarm()
     }
 
-    fun destroy() { cancel(); destroyPending() }
+    fun destroy() { duckPinned = false; cancel(); destroyPending() }
 
     companion object {
         private const val TAG = "VoiceRecognizer"
