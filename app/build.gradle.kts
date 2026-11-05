@@ -15,7 +15,7 @@ android {
         applicationId = "com.example.voicedialauto"
         minSdk = 26
         targetSdk = 36
-        versionCode = 18
+        versionCode = 20
         versionName = "0.16-v16"
 
         // Car app category, injected into the manifest.

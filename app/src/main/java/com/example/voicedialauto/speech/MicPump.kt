@@ -5,10 +5,8 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioFormat
-import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.media.audiofx.AcousticEchoCanceler
@@ -134,22 +132,33 @@ class MicPump private constructor(
 
     // ---------------------------------------------------------------- sources
 
-    private class PhoneMic : Source {
+    private class PhoneMic(
+        private val context: Context,
+        /** Car session: don't enter communication mode (that pauses media); duck like Waze instead. */
+        private val duckMedia: Boolean,
+    ) : Source {
         override val label = "phone"
         override var info = ""
         private var rec: AudioRecord? = null
         private var aec: AcousticEchoCanceler? = null
         private var ns: NoiseSuppressor? = null
+        private var focus: AudioFocusRequest? = null
         @SuppressLint("MissingPermission") // checked in create()
         override fun start() {
+            if (duckMedia) {
+                focus = NavDuck.hold(context)
+            }
             val min = AudioRecord.getMinBufferSize(VadEngine.SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
-            // v15: VOICE_COMMUNICATION gets the platform's echo canceller / noise suppressor in the
-            // capture path (our TTS prompt is the "far end"); VOICE_RECOGNITION if it can't open.
-            var source = "VOICE_COMMUNICATION"
-            var r = runCatching {
-                AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, VadEngine.SAMPLE_RATE,
-                    AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(min, 8192))
-            }.getOrNull()?.let { if (it.state == AudioRecord.STATE_INITIALIZED) it else { it.release(); null } }
+            // v15: VOICE_COMMUNICATION gets AEC/NS in the capture path (TTS is the far end).
+            // In the car it also flips MODE_IN_COMMUNICATION and pauses media — skip it when ducking.
+            var source = if (duckMedia) "VOICE_RECOGNITION" else "VOICE_COMMUNICATION"
+            var r: AudioRecord? = null
+            if (!duckMedia) {
+                r = runCatching {
+                    AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, VadEngine.SAMPLE_RATE,
+                        AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(min, 8192))
+                }.getOrNull()?.let { if (it.state == AudioRecord.STATE_INITIALIZED) it else { it.release(); null } }
+            }
             if (r == null) {
                 source = "VOICE_RECOGNITION"
                 r = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, VadEngine.SAMPLE_RATE,
@@ -158,16 +167,22 @@ class MicPump private constructor(
             check(r.state == AudioRecord.STATE_INITIALIZED) { "AudioRecord not initialized" }
             if (AcousticEchoCanceler.isAvailable()) aec = AcousticEchoCanceler.create(r.audioSessionId)?.apply { enabled = true }
             if (NoiseSuppressor.isAvailable()) ns = NoiseSuppressor.create(r.audioSessionId)?.apply { enabled = true }
-            info = "source=$source aec=${aec?.enabled ?: "n/a"} ns=${ns?.enabled ?: "n/a"}"
+            info = "source=$source aec=${aec?.enabled ?: "n/a"} ns=${ns?.enabled ?: "n/a"} duck=$duckMedia"
             r.startRecording()
             rec = r
         }
         override fun read(buf: ByteArray): Int = rec?.read(buf, 0, buf.size) ?: -1
-        override fun stop() { rec?.let { runCatching { it.stop() } } }
+        override fun stop() {
+            rec?.let { runCatching { it.stop() } }
+            NavDuck.release(context, focus)
+            focus = null
+        }
         override fun release() {
             rec?.let { runCatching { it.release() } }
             rec = null
             aec?.release(); aec = null; ns?.release(); ns = null
+            NavDuck.release(context, focus)
+            focus = null
         }
     }
 
@@ -178,21 +193,14 @@ class MicPump private constructor(
         @SuppressLint("MissingPermission") // checked in car()
         override fun start() {
             val rec = CarAudioRecord.create(carContext).also { record = it }
-            // Transient exclusive focus so media is paused and not recorded (CarAudioRecord docs).
-            val am = carContext.getSystemService(AudioManager::class.java)
-            val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
-                .setAudioAttributes(
-                    AudioAttributes.Builder().setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                        .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE).build(),
-                ).build()
-            focus = req
-            am.requestAudioFocus(req)
+            // Waze-style duck, not EXCLUSIVE — exclusive paused media completely.
+            focus = NavDuck.hold(carContext)
             rec.startRecording()
         }
         override fun read(buf: ByteArray): Int = record?.read(buf, 0, buf.size) ?: -1
         override fun stop() {
             runCatching { record?.stopRecording() }
-            focus?.let { carContext.getSystemService(AudioManager::class.java).abandonAudioFocusRequest(it) }
+            NavDuck.release(carContext, focus)
             focus = null
         }
     }
@@ -210,9 +218,14 @@ class MicPump private constructor(
         private fun granted(c: Context) =
             ContextCompat.checkSelfPermission(c, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
-        fun phone(context: Context, vad: VadEngine?, onFrame: (Float, Float, Long) -> Unit): MicPump {
+        fun phone(
+            context: Context,
+            vad: VadEngine?,
+            duckMedia: Boolean = false,
+            onFrame: (Float, Float, Long) -> Unit,
+        ): MicPump {
             check(granted(context)) { "RECORD_AUDIO not granted" }
-            return MicPump(PhoneMic(), vad, onFrame)
+            return MicPump(PhoneMic(context, duckMedia), vad, onFrame)
         }
 
         fun car(carContext: CarContext, vad: VadEngine?, onFrame: (Float, Float, Long) -> Unit): MicPump {

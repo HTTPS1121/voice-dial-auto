@@ -2,6 +2,7 @@ package com.example.voicedialauto.speech
 
 import android.content.Context
 import android.content.Intent
+import android.media.AudioFocusRequest
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -64,6 +65,7 @@ class VoiceRecognizer(
     private var warm: SpeechRecognizer? = null
     private val dropWarm = Runnable { releaseWarm() }
     private var pump: MicPump? = null
+    private var duck: AudioFocusRequest? = null
     private var active = false
     private var sessionId = 0
 
@@ -180,10 +182,10 @@ class VoiceRecognizer(
                 val engine = if (vs.enabled) runCatching { VadEngine.get(context) }.getOrNull() else null
                 if (engine == null) whyNoVad = if (vs.enabled) "VAD engines failed to load" else "VAD off in settings"
                 val p = if (carMic) MicPump.car(carContext!!, engine) { pr, db, at -> onFrame(pr, db, at) }
-                else MicPump.phone(context, engine) { pr, db, at -> onFrame(pr, db, at) }
+                else MicPump.phone(context, engine, duckMedia = source == "car") { pr, db, at -> onFrame(pr, db, at) }
+                pump = p
                 p.attachTo(intent)
                 p.start()
-                pump = p
             } catch (t: Throwable) {
                 Log.w(TAG, "Own audio capture unavailable (carMic=$carMic)", t)
                 FileLog.log("vad", "own capture failed (carMic=$carMic): ${t.javaClass.simpleName} ${t.message}", source)
@@ -198,6 +200,11 @@ class VoiceRecognizer(
         }
         val usingCarMic = pump?.label == "car"
         val usingPump = pump != null
+        // No own capture: still duck like Waze so SpeechRecognizer doesn't pause media.
+        if (source == "car" && !usingPump && duck == null) {
+            duck = NavDuck.hold(context)
+            FileLog.log("audio", "nav-duck (no own capture)", source)
+        }
         val vadName = pump?.vadName ?: "none"
         val vadOn = usingPump && vadName != "none"
         run {
@@ -547,6 +554,8 @@ class VoiceRecognizer(
         sessionId++
         if (pump?.label == "car") lastCarEndAt = SystemClock.elapsedRealtime()
         pump?.stop(); pump = null
+        NavDuck.release(context, duck)
+        duck = null
         recognizer?.let { r ->
             if (keepWarm) {
                 releaseWarm()

@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import androidx.car.app.CarContext
 import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
@@ -15,8 +16,7 @@ import java.util.Locale
 /**
  * TextToSpeech-backed [Speaker]. Guarantees [speak]'s onDone is called exactly once: when the
  * utterance finishes, fails, is stopped, TTS isn't available, or after a safety timeout.
- * Uses USAGE_ASSISTANT (not the navigation channel, which car quality rules reserve for nav apps)
- * and transient may-duck audio focus.
+ * Car: same duck as Waze (NAVIGATION_GUIDANCE + MAY_DUCK). Phone: USAGE_ASSISTANT.
  */
 class TtsSpeaker(context: Context) : Speaker {
     private val app = context.applicationContext
@@ -48,10 +48,11 @@ class TtsSpeaker(context: Context) : Speaker {
         }
     }
 
-    private val attrs = AudioAttributes.Builder()
-        .setUsage(AudioAttributes.USAGE_ASSISTANT)
-        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-        .build()
+    private val attrs = if (context is CarContext) NavDuck.attrs()
+        else AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_ASSISTANT)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+            .build()
 
     private val tts: TextToSpeech = TextToSpeech(app) { status ->
         main.post {
@@ -129,6 +130,7 @@ class TtsSpeaker(context: Context) : Speaker {
     private fun requestFocus() {
         val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
             .setAudioAttributes(attrs)
+            .setWillPauseWhenDucked(false)
             .setOnAudioFocusChangeListener(focusListener, main)
             .build()
         focus = req
