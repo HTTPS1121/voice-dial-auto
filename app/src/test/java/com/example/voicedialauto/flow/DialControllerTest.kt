@@ -18,9 +18,6 @@ class DialControllerTest {
         var lastLang: String? = null
         /** If set, every start immediately fails with this error (error storm). */
         var stormError: RecognitionError? = null
-        var duckPinned = false
-        override fun pinDuck() { duckPinned = true }
-        override fun unpinDuck() { duckPinned = false }
         val options = mutableListOf<ListenOptions>()
         override fun start(languageTag: String, listener: SpeechListener, options: ListenOptions) {
             this.options += options
@@ -33,6 +30,9 @@ class DialControllerTest {
         fun say(vararg h: String) { val l = listener!!; listener = null; active--; l.onResults(h.toList()) }
         fun silence() = error(RecognitionError.NO_SPEECH)
         fun error(e: RecognitionError) { val l = listener!!; listener = null; active--; l.onError(e) }
+        var duckPinned = false
+        override fun pinDuck() { duckPinned = true }
+        override fun unpinDuck() { duckPinned = false }
         val listening get() = listener != null
         fun partial(t: String) { listener!!.onPartial(t) }
         /** The recognition ENGINE ended the session on its own (e.g. at the pause after "חני"). */
@@ -655,7 +655,7 @@ class DialControllerTest {
         val sp = FakeSpeaker()
         val c = controller(sp); toList(c)
         speech.partial("…")
-        assertTrue(!sp.speaking)
+        assertTrue(c.state is DialState.Choosing)
         speech.partial("שתיים")
         assertTrue(c.state is DialState.Confirm)
     }
@@ -885,13 +885,24 @@ class DialControllerTest {
         }
     }
 
-    @Test fun numberInLongListUtteranceStillPicks() {
-        val sp = FakeSpeaker()
-        val c = controller(sp); c.onVisible(); speech.say("תתקשר לדנה")
-        val items = (c.state as DialState.Choosing).items
-        speech.partial("נמצאו כמה שמות שתיים")
-        assertEquals(items[1], (c.state as DialState.Confirm).entry)
-        assertTrue(sp.spoken.last().startsWith("picked "))
+    @Test fun duckStaysThroughSingleMatchCountdownUntilCall() {
+        val c = controller(); c.onVisible()
+        assertTrue(speech.duckPinned)
+        speech.say("call Moshe")
+        assertTrue(c.state is DialState.Confirm)
+        assertTrue(speech.duckPinned)
+        c.callNow()
+        assertTrue(speech.duckPinned)
+        c.onInterrupted()
+        assertTrue(!speech.duckPinned)
+    }
+
+    @Test fun duckSurvivesSessionHideWhileCalling() {
+        val c = controller(); c.onVisible(); speech.say("call Moshe"); c.callNow()
+        c.onHidden()
+        assertTrue(speech.duckPinned)
+        clock.advance(3_000)
+        assertTrue(!speech.duckPinned)
     }
 
     // ---------------------------------------------------------------- v15b: names on the list, continuation

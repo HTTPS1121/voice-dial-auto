@@ -66,6 +66,7 @@ class VoiceRecognizer(
     private val dropWarm = Runnable { releaseWarm() }
     private var pump: MicPump? = null
     private var duck: AudioFocusRequest? = null
+    /** DialController holds this across name → list / countdown so media doesn't unduck between hops. */
     private var duckPinned = false
     private var active = false
     private var sessionId = 0

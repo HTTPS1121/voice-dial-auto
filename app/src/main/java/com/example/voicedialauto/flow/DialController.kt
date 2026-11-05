@@ -17,15 +17,17 @@ import kotlin.math.ceil
  * Anti-loop rules (v4):
  *  - every recognizer session gets a token; callbacks from older sessions, and any callback after
  *    the first terminal one (results/error) of a session, are ignored;
- *  - automatic starts (open, resume, silence restart, BUSY/CLIENT retry) pass a circuit breaker
+ *  - automatic starts (resume, silence restart, BUSY/CLIENT retry) pass a circuit breaker
  *    ([DialConfig.maxAutoStarts] per [DialConfig.autoStartWindowMs]); user actions reset it;
+ *    opening the app (icon / first onVisible) is a user start, not automatic;
  *  - silence restarts continue until the (configurable) window expires, but a session that failed
  *    fast (< minHealthySessionMs) is restarted at most maxFastRestarts times and passes the breaker;
  *    healthy restarts don't count against the breaker (they are ≥ 1.5 s apart by definition);
  *  - at most ONE transient-error (BUSY/CLIENT) retry, with backoff, per request;
  *  - when the window expires with no speech in progress, the mic is closed;
- *  - onVisible()/onHidden() are idempotent, and a short absence (< minAwayForAutoListenMs: dialog,
- *    notification shade, overlay) never re-triggers listening.
+ *  - onVisible()/onHidden() are idempotent; a hide shorter than [DialConfig.hideDebounceMs] is
+ *    ignored (AA first-paint flap). After a real hide, Listening/Processing resume; Idle stays
+ *    Idle unless away ≥ minAwayForAutoListenMs or the launcher sends restart().
  */
 class DialController(
     private val speech: SpeechInput,
@@ -74,6 +76,7 @@ class DialController(
     private var pending: Cancellable? = null // countdown tick or delayed restart
     private var suppressNextVisible = false
     private var hideTask: Cancellable? = null
+    private var duckHold: Cancellable? = null
     /** True after [commitHide] actually released the mic. False if hide was only scheduled. */
     private var hideCommitted = false
     /** Last non-blank partial of the current listening session (car endpointing fallback). */
@@ -153,7 +156,8 @@ class DialController(
     private fun commitHide() {
         hideCommitted = true
         stopAll()
-        dropDuck()
+        // Placing a call stops the car session; don't unduck or media slams back before telephony.
+        if (state !is DialState.Calling) dropDuck()
         when (val s = state) {
             is DialState.Confirm -> set(DialState.Idle())
             is DialState.Choosing -> set(s.copy(mic = MicState.OFF, partial = null))
@@ -719,10 +723,17 @@ class DialController(
             set(DialState.Failed(DialError.CALL_FAILED, entry.displayName))
             return
         }
-        dropDuck()
+        // Don't unduck here: ACTION_DIAL/CALL takes ~1s before telephony has audio, and media
+        // would slam back to full volume. Release when the call interrupts us, or after a timeout.
+        duckHold?.cancel()
+        duckHold = scheduler.post(config.duckHoldAfterDialMs) {
+            duckHold = null
+            if (state is DialState.Calling) speech.unpinDuck()
+        }
     }
 
     private fun dropDuck() {
+        duckHold?.cancel(); duckHold = null
         speech.unpinDuck()
     }
 

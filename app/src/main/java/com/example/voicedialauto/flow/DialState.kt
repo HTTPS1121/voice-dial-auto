@@ -90,6 +90,8 @@ data class DialConfig(
      * otherwise the next onVisible dumps to Idle ("tap the mic").
      */
     val hideDebounceMs: Long = 400,
+    /** Keep media ducked after dialing until the phone call grabs audio (or this timeout). */
+    val duckHoldAfterDialMs: Long = 3_000,
     val suggestionThreshold: Double = 0.35,
     val maxSuggestions: Int = 3,
     /** Match threshold (ContactMatcher). Lowered in v7 for first-name / cross-script. */
