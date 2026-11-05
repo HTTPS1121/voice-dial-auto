@@ -43,6 +43,7 @@
     <string name="car_cancel_call">Cancel call</string>
     <string name="car_cancel_call_secs">Cancel call (%1$d)</string>
     <string name="car_confirm_simple">Calling %1$s in %2$s seconds</string>
+    <string name="car_confirm_wait">Calling %1$s</string>
     <string name="car_no_match_simple">No name found, please try again</string>
     <string name="car_listen_again">Start listening again</string>
     <string name="car_sync">סנכרן אנשי קשר</string>

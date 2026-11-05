@@ -201,6 +201,7 @@ class MainActivity : ComponentActivity() {
                     secondaryLanguage = prefs.secondaryLanguage,
                     onMicClick = { controller.micPressed() },
                     onCancel = { controller.cancel() },
+                    onCallNow = { controller.callNow() },
                     onRecognizeAgain = { controller.recognizeAgain() },
                     onTryOtherLanguage = { controller.tryOtherLanguage() },
                     onToggleLanguage = {
@@ -280,6 +281,7 @@ private fun DialerMainScreen(
     secondaryLanguage: String,
     onMicClick: () -> Unit,
     onCancel: () -> Unit,
+    onCallNow: () -> Unit,
     onRecognizeAgain: () -> Unit,
     onTryOtherLanguage: () -> Unit,
     onToggleLanguage: () -> Unit,
@@ -431,6 +433,7 @@ private fun DialerMainScreen(
                     is DialState.Confirm -> ConfirmCountdownView(
                         state = s,
                         onCancel = onCancel,
+                        onCallNow = onCallNow,
                     )
                     is DialState.Choosing -> ChoosingListView(
                         state = s,
@@ -758,6 +761,7 @@ private fun CenterOrbView(
 private fun ConfirmCountdownView(
     state: DialState.Confirm,
     onCancel: () -> Unit,
+    onCallNow: () -> Unit,
 ) {
     var progress by remember(state.entry.key) {
         mutableFloatStateOf((state.remainingMs.toFloat() / state.totalMs.coerceAtLeast(1L)).coerceIn(0f, 1f))
@@ -853,24 +857,46 @@ private fun ConfirmCountdownView(
             }
         }
 
-        Button(
-            onClick = onCancel,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.errorContainer,
-                contentColor = MaterialTheme.colorScheme.onErrorContainer,
-            ),
-            shape = RoundedCornerShape(22.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(64.dp),
-        ) {
-            Icon(Icons.Rounded.Close, contentDescription = null)
-            Spacer(Modifier.width(10.dp))
-            Text(
-                text = stringResource(R.string.ph_cancel_call),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-            )
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Button(
+                onClick = onCallNow,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                ),
+                shape = RoundedCornerShape(22.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(64.dp),
+            ) {
+                Icon(Icons.Rounded.Call, contentDescription = null)
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = stringResource(R.string.ph_call_now),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+            Button(
+                onClick = onCancel,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                ),
+                shape = RoundedCornerShape(22.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(64.dp),
+            ) {
+                Icon(Icons.Rounded.Close, contentDescription = null)
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = stringResource(R.string.ph_cancel_call),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
         }
     }
 }

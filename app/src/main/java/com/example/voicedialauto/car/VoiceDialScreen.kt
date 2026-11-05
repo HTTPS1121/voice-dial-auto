@@ -138,14 +138,19 @@ class VoiceDialScreen(carContext: CarContext, private val controller: DialContro
                 live = carContext.getString(R.string.car_searching, s.heard),
             )
 
-            // v12: name + countdown + ONE action "בטל התקשרות". The message (title + text) never
-            // changes during the countdown, so the seconds in the button label are refreshes, not
-            // new task steps. Our own timer places the call (no Action.FLAG_DEFAULT on anything).
+            // Message text is stable (name only). Seconds live on the Cancel button = refresh, not a
+            // new task step. Call now skips the timer. No Action.FLAG_DEFAULT.
             is DialState.Confirm -> {
-                val secs = if (s.totalMs % 1000 == 0L) "${s.totalMs / 1000}" else "%.1f".format(s.totalMs / 1000.0)
-                MessageTemplate.Builder(carContext.getString(R.string.car_confirm_simple, s.entry.displayName, secs))
+                MessageTemplate.Builder(carContext.getString(R.string.car_confirm_wait, s.entry.displayName))
                     .header(carContext, title, null)
                     .setIcon(CarUi.icon(carContext, R.drawable.ic_call, CarColor.GREEN))
+                    .addAction(
+                        Action.Builder()
+                            .setTitle(carContext.getString(R.string.car_call_now))
+                            .setBackgroundColor(CarColor.GREEN)
+                            .setOnClickListener { controller.callNow() }
+                            .build(),
+                    )
                     .addAction(
                         Action.Builder()
                             .setTitle(carContext.getString(R.string.car_cancel_call_secs, s.secondsLeft))

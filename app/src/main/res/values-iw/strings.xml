@@ -39,6 +39,7 @@
     <string name="car_cancel_call">בטל התקשרות</string>
     <string name="car_cancel_call_secs">בטל התקשרות (%1$d)</string>
     <string name="car_confirm_simple">מתקשר ל%1$s בעוד %2$s שניות</string>
+    <string name="car_confirm_wait">מתקשר ל%1$s</string>
     <string name="car_no_match_simple">לא נמצא אף שם, נסה מחדש</string>
     <string name="car_listen_again">התחל האזנה שוב</string>
     <string name="car_sync">סנכרן אנשי קשר</string>
