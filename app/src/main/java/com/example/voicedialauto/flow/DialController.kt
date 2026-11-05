@@ -73,6 +73,9 @@ class DialController(
     private var token = 0
     private var pending: Cancellable? = null // countdown tick or delayed restart
     private var suppressNextVisible = false
+    private var hideTask: Cancellable? = null
+    /** True after [commitHide] actually released the mic. False if hide was only scheduled. */
+    private var hideCommitted = false
     /** Last non-blank partial of the current listening session (car endpointing fallback). */
     private var lastPartial: String? = null
 
@@ -84,8 +87,16 @@ class DialController(
 
     /** App/screen became visible (phone onStart, car session onStart). Idempotent. */
     fun onVisible() {
+        hideTask?.cancel(); hideTask = null
         if (visible) { emit(); return }
         visible = true
+        // AA onStop/onStart flap: hide never committed, mic still open, stay on Listening.
+        if (opened && !hideCommitted) {
+            hiddenAt = null
+            emit()
+            return
+        }
+        hideCommitted = false
         val now = scheduler.now()
         val away = hiddenAt?.let { now - it } ?: Long.MAX_VALUE
         hiddenAt = null
@@ -103,6 +114,7 @@ class DialController(
         if (missing.isNotEmpty()) { set(DialState.NeedsPermissions(missing)); return }
 
         val s = state
+        val lang = languages.primaryLanguage
         val longAway = away >= config.minAwayForAutoListenMs
         if (holdAutoListen && opened) {
             // After a phone call interrupted us: show the idle mic, never auto-resume.
@@ -112,17 +124,18 @@ class DialController(
             return
         }
         when {
-            !opened -> { opened = true; listenName(languages.primaryLanguage, auto = true) }
-            s is DialState.NeedsPermissions -> listenName(languages.primaryLanguage, auto = true)
+            !opened -> { opened = true; userAction(); listenName(lang) }
+            s is DialState.NeedsPermissions -> listenName(lang)
+            // Host paused us; UI still says listening — open the mic again, never dump to Idle.
+            s is DialState.Listening || s is DialState.Processing -> listenName(lang, auto = true)
             s is DialState.Calling || s is DialState.Idle ->
                 if (recentlyCalled()) set(DialState.Idle(lastCalledName))
-                else if (longAway) listenName(languages.primaryLanguage, auto = true)
+                else if (longAway) listenName(lang, auto = true)
                 else emit()
             s is DialState.Choosing ->
                 if (longAway && autoGuard.tryAcquire(now)) listenChoice(s.items) else set(s.copy(mic = MicState.OFF))
             s is DialState.NoMatch || s is DialState.Failed -> emit()
-            // Interrupted while listening/processing.
-            else -> if (longAway) listenName(languages.primaryLanguage, auto = true) else set(DialState.Idle(lastCalledName))
+            else -> if (longAway) listenName(lang, auto = true) else set(DialState.Idle(lastCalledName))
         }
     }
 
@@ -131,11 +144,19 @@ class DialController(
         if (!visible) return
         visible = false
         hiddenAt = scheduler.now()
+        hideTask?.cancel()
+        val delay = config.hideDebounceMs
+        if (delay <= 0) commitHide()
+        else hideTask = scheduler.post(delay) { hideTask = null; commitHide() }
+    }
+
+    private fun commitHide() {
+        hideCommitted = true
         stopAll()
         when (val s = state) {
             is DialState.Confirm -> set(DialState.Idle())
             is DialState.Choosing -> set(s.copy(mic = MicState.OFF, partial = null))
-            else -> Unit // Listening/Processing are handled by onVisible()
+            else -> Unit // Listening/Processing resume in onVisible()
         }
     }
 
@@ -171,6 +192,9 @@ class DialController(
 
     /** Launcher icon tapped again / app re-opened via intent. */
     fun restart() {
+        hideTask?.cancel(); hideTask = null
+        hideCommitted = false
+        visible = true
         val missing = permissions()
         if (missing.isNotEmpty()) { set(DialState.NeedsPermissions(missing)); return }
         opened = true
@@ -226,6 +250,7 @@ class DialController(
     // ------------------------------------------------------------------ name lookup
 
     private fun listenName(lang: String, auto: Boolean = false) {
+        hideTask?.cancel(); hideTask = null
         stopAll()
         if (auto && !autoGuard.tryAcquire(scheduler.now())) {
             // Circuit breaker: too many automatic starts → wait for the user.

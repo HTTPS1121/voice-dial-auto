@@ -96,6 +96,7 @@ class DialControllerTest {
         speaker: Speaker? = null,
         list: List<ContactEntry> = contacts,
         worker: Worker = Worker.Inline,
+        config: DialConfig = DialConfig(afterCallQuietMs = 60_000, listLimit = 6, hideDebounceMs = 0),
     ) = DialController(
         timings = timings,
         speech = speech,
@@ -109,7 +110,7 @@ class DialControllerTest {
         scheduler = clock,
         permissions = { missing },
         languages = FakeLang(),
-        config = DialConfig(afterCallQuietMs = 60_000, listLimit = 6),
+        config = config,
         speaker = speaker,
         prompts = speaker?.let {
             object : Prompts {
@@ -376,7 +377,8 @@ class DialControllerTest {
     @Test fun resumeFlappingDuringListeningDoesNotLoop() {
         val c = controller(); c.onVisible()
         repeat(20) { clock.advance(100); c.onHidden(); clock.advance(100); c.onVisible() }
-        assertEquals(1, speech.starts)
+        // Open is a user start; each resume is auto. Breaker caps autos at 3 / 20 s.
+        assertEquals(4, speech.starts)
         assertTrue(c.state is DialState.Idle)
         assertEquals(1, speech.maxConcurrent)
     }
@@ -384,10 +386,19 @@ class DialControllerTest {
     @Test fun longAwayFlappingIsCircuitBroken() {
         val c = controller(); c.onVisible()
         repeat(7) { c.onHidden(); clock.advance(2_500); c.onVisible() }   // 17.5 s < 20 s window
-        assertEquals(3, speech.starts)                                     // max 3 automatic starts / 20 s
+        assertEquals(4, speech.starts)                                     // 1 open + max 3 automatic / 20 s
         assertTrue(c.state is DialState.Idle)
         // A user tap always works again.
         c.micPressed(); assertTrue(c.state is DialState.Listening)
+    }
+
+    @Test fun hideFlapWithinDebounceKeepsListeningWithoutRestart() {
+        val c = controller(config = DialConfig(afterCallQuietMs = 60_000, listLimit = 6, hideDebounceMs = 400))
+        c.onVisible()
+        repeat(8) { c.onHidden(); clock.advance(100); c.onVisible(); clock.advance(100) }
+        assertEquals(1, speech.starts)
+        assertTrue(c.state is DialState.Listening)
+        assertTrue(speech.listening)
     }
 
     @Test fun duplicateOnVisibleStartsOnce() {

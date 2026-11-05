@@ -83,8 +83,13 @@ data class DialConfig(
     /** Circuit breaker: max automatic (non-user) listening starts per window. */
     val maxAutoStarts: Int = 3,
     val autoStartWindowMs: Long = 20_000,
-    /** Away shorter than this (dialog, shade, overlay) never auto-restarts listening. */
+    /** Away shorter than this (dialog, shade, overlay) never auto-restarts listening from Idle. */
     val minAwayForAutoListenMs: Long = 2_000,
+    /**
+     * AA host often onStop/onStart within this window on first paint. Don't kill the mic yet —
+     * otherwise the next onVisible dumps to Idle ("tap the mic").
+     */
+    val hideDebounceMs: Long = 400,
     val suggestionThreshold: Double = 0.35,
     val maxSuggestions: Int = 3,
     /** Match threshold (ContactMatcher). Lowered in v7 for first-name / cross-script. */

@@ -24,14 +24,12 @@ import com.example.voicedialauto.util.Permissions
 import com.example.voicedialauto.util.Prefs
 
 /**
- * Contacts are preloaded from the Application context before the first auto-listen.
- * See [ContactsCache] for the car-only empty-cache race this fixes.
+ * Contacts preload in the background. Matching waits on [ContactsCache.withContacts];
+ * listening must not wait — first template would be Idle ("tap the mic").
  */
 class VoiceDialSession : Session() {
 
     private lateinit var controller: DialController
-    private var contactsReady = false
-    private var started = false
 
     override fun onCreateScreen(intent: Intent): Screen {
         val appCtx = runCatching { VoiceDialApp.instance }.getOrElse { carContext.applicationContext }
@@ -65,14 +63,12 @@ class VoiceDialSession : Session() {
         tts.onFocusLoss = { if (interruptions.isInCallNow()) controller.onInterrupted() }
         lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) {
-                started = true
-                FileLog.log("lifecycle", "car session onStart (contactsReady=$contactsReady)", "car")
+                FileLog.log("lifecycle", "car session onStart", "car")
                 interruptions.start()
                 com.example.voicedialauto.speech.VoiceRecognizer.resetAudioPolicy()
-                maybeBecomeVisible()
+                controller.onVisible()
             }
             override fun onStop(owner: LifecycleOwner) {
-                started = false
                 FileLog.log("lifecycle", "car session onStop → cancel countdown / mic / TTS", "car")
                 controller.onHidden()
                 interruptions.stop()
@@ -84,14 +80,13 @@ class VoiceDialSession : Session() {
         })
         ContactsCache.refresh(appCtx) { list ->
             Log.i(TAG, "car preload: ${list.size} contacts")
-            contactsReady = true
-            maybeBecomeVisible()
         }
+        // Listen BEFORE wiring the screen: emit() with no listener is a no-op, and the first
+        // template is already Listening. Calling onVisible after VoiceDialScreen() NPE's
+        // ScreenManager.getTop() — the host has not pushed the screen yet (crashes the process,
+        // phone included).
+        controller.onVisible()
         return VoiceDialScreen(carContext, controller)
-    }
-
-    private fun maybeBecomeVisible() {
-        if (started && contactsReady) controller.onVisible()
     }
 
     override fun onNewIntent(intent: Intent) {

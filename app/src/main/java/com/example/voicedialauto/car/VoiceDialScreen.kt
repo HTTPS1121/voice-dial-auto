@@ -43,7 +43,11 @@ class VoiceDialScreen(carContext: CarContext, private val controller: DialContro
      * (3) invalidations are throttled to one per [MIN_INVALIDATE_MS].
      */
     private fun onState(s: DialState) {
-        val top = screenManager.top
+        val top = runCatching { screenManager.top }.getOrNull()
+        if (top == null) {
+            refreshRoot()
+            return
+        }
         if (needsList(s)) {
             if (top is ContactListScreen) top.refresh()
             else { rootKey = null; screenManager.push(ContactListScreen(carContext, controller)) }
