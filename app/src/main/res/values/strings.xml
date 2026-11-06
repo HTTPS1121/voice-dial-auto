@@ -28,6 +28,8 @@
     <string name="car_recognize">Recognize</string>
     <string name="car_recognize_again">Recognize again</string>
     <string name="car_cancel">Cancel</string>
+    <string name="car_cancel_secs">Cancel (%1$d)</string>
+    <string name="car_wait_secs">%1$d s</string>
     <string name="car_call_now">Call now</string>
     <string name="car_confirm">Calling %1$s (%2$s)…</string>
     <string name="car_did_you_mean">Did you mean…?</string>

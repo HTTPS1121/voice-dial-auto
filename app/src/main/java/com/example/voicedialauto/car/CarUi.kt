@@ -27,8 +27,18 @@ internal object CarUi {
     fun icon(ctx: CarContext, res: Int, tint: CarColor? = null): CarIcon =
         CarIcon.Builder(IconCompat.createWithResource(ctx, res)).apply { tint?.let { setTint(it) } }.build()
 
-    fun iconAction(ctx: CarContext, res: Int, tint: CarColor? = null, onClick: () -> Unit): Action =
-        Action.Builder().setIcon(icon(ctx, res, tint)).setOnClickListener(onClick).build()
+    fun iconAction(
+        ctx: CarContext,
+        res: Int,
+        tint: CarColor? = null,
+        title: String? = null,
+        onClick: () -> Unit,
+    ): Action =
+        Action.Builder()
+            .setIcon(icon(ctx, res, tint))
+            .apply { if (!title.isNullOrBlank()) setTitle(bidi(ctx, title)) }
+            .setOnClickListener(onClick)
+            .build()
 
     @Suppress("DEPRECATION")
     fun MessageTemplate.Builder.header(ctx: CarContext, title: String, endAction: Action?): MessageTemplate.Builder =

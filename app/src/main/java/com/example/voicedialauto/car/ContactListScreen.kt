@@ -24,7 +24,7 @@ import com.example.voicedialauto.util.Prefs
  * Header mic shows listening vs off. v9: the mic opens the
  * moment the list appears and stays red for the whole list window (restarts included); the
  * optional short TTS prompt plays over the open mic (barge-in).
- * Row tap = call immediately. Spoken number/name → countdown from Settings (default 3.5 s, 0 = none) (handled by DialController).
+ * Row tap / spoken number: delay from Settings list countdown (default 0 = call now).
  */
 class ContactListScreen(carContext: CarContext, private val controller: DialController) : Screen(carContext) {
 
@@ -49,7 +49,7 @@ class ContactListScreen(carContext: CarContext, private val controller: DialCont
     }
 
     private fun key(s: DialState): String = when (s) {
-        is DialState.Choosing -> "CH|${s.items.joinToString(",") { "${it.contactId}:${it.number}" }}|${s.mic}"
+        is DialState.Choosing -> "CH|${s.items.joinToString(",") { "${it.contactId}:${it.number}" }}|${s.mic}|${s.secondsLeft}"
         is DialState.NoMatch -> "NM|${s.heard}|${s.contactsCount}|${s.topCandidates.map { it.contact.contactId }}|${s.suggestions.map { it.contactId }}"
         else -> "X"
     }
@@ -71,13 +71,18 @@ class ContactListScreen(carContext: CarContext, private val controller: DialCont
     private fun choosing(s: DialState.Choosing): Template {
         val list = ItemList.Builder()
         s.items.forEachIndexed { i, c -> list.addItem(row(numberedTitle(carContext, i + 1, c.displayName), c) { controller.pick(c) }) }
-        val mic = when (s.mic) {
-            MicState.LISTENING -> CarUi.iconAction(carContext, R.drawable.ic_mic, CarColor.RED) { controller.micPressed() }
-            MicState.SPEAKING -> CarUi.iconAction(carContext, R.drawable.ic_volume) { controller.micPressed() }
-            MicState.OFF -> CarUi.iconAction(carContext, R.drawable.ic_mic_off) { controller.micPressed() }
+        val micIcon = when (s.mic) {
+            MicState.LISTENING -> R.drawable.ic_mic
+            MicState.SPEAKING -> R.drawable.ic_volume
+            MicState.OFF -> R.drawable.ic_mic_off
         }
+        val micTint = if (s.mic == MicState.LISTENING) CarColor.RED else null
+        val wait = if (s.secondsLeft > 0) carContext.getString(R.string.car_wait_secs, s.secondsLeft) else null
+        val headerAction = CarUi.iconAction(
+            carContext, micIcon, micTint, wait,
+        ) { controller.micPressed() }
         return ListTemplate.Builder()
-            .header(carContext, bidi(carContext, carContext.getString(R.string.car_choose_title)), mic)
+            .header(carContext, bidi(carContext, carContext.getString(R.string.car_choose_title)), headerAction)
             .setSingleList(list.build())
             .build()
     }

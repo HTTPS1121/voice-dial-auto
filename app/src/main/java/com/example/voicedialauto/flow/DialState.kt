@@ -11,7 +11,12 @@ enum class DialError { NOT_AVAILABLE, NETWORK, LANGUAGE, NO_CONTACTS, CALL_FAILE
 sealed interface DialState {
     data class NeedsPermissions(val missing: List<String>) : DialState
     data class Idle(val lastCalled: String? = null) : DialState
-    data class Listening(val lang: String, val partial: String? = null) : DialState
+    data class Listening(
+        val lang: String,
+        val partial: String? = null,
+        /** Whole seconds left in the name-listening window (rounded up). */
+        val secondsLeft: Int = 0,
+    ) : DialState
     data class Processing(val heard: String) : DialState
     /** [secondsLeft] = whole seconds shown (rounded up); [remainingMs]/[totalMs] drive the progress bar. */
     data class Confirm(
@@ -28,6 +33,8 @@ sealed interface DialState {
         val partial: String? = null,
         /** The driver said a number that isn't on the list (e.g. "five" with 3 rows). */
         val outOfRange: Int? = null,
+        /** Whole seconds left in the list-listening window (rounded up). */
+        val secondsLeft: Int = 0,
     ) : DialState
     /**
      * heard == "" → nothing was heard.
@@ -49,6 +56,8 @@ data class DialConfig(
     val nameWindowMs: Long = DEFAULT_NAME_WINDOW_MS,
     val choiceWindowMs: Long = DEFAULT_CHOICE_WINDOW_MS,
     val countdownMs: Long = DEFAULT_COUNTDOWN_MS,
+    /** After a list pick (spoken number/name or row tap). 0 = call immediately. */
+    val listCountdownMs: Long = DEFAULT_LIST_COUNTDOWN_MS,
     /**
      * A recognizer session that ended (silence/error) faster than this is a "fast failure"
      * (error storm, recognizer refusing). Only [maxFastRestarts] of those per request are restarted,
@@ -101,6 +110,7 @@ data class DialConfig(
 const val DEFAULT_NAME_WINDOW_MS = 10_000L
 const val DEFAULT_CHOICE_WINDOW_MS = 30_000L
 const val DEFAULT_COUNTDOWN_MS = 5_000L
+const val DEFAULT_LIST_COUNTDOWN_MS = 0L
 
 /** "Restart on silence" budget: at most [maxRestarts] restarts and only within [windowMs] since [begin]. */
 class RestartPolicy(private val windowMs: Long, private val maxRestarts: Int) {

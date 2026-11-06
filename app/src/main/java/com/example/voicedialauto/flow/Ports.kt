@@ -94,8 +94,10 @@ interface TimingSource {
     val nameWindowMs: Long
     /** List: total time to wait for "1, 2, 3…" or a name, including silence restarts. */
     val choiceWindowMs: Long
-    /** Delay before an automatic call; 0 = call immediately. Default 5 s (v12). */
+    /** Delay before an automatic call after a single name match; 0 = call immediately. Default 5 s. */
     val countdownMs: Long
+    /** Delay after a list pick (number/name/row). 0 = call immediately. */
+    val listCountdownMs: Long get() = 0
     /**
      * RMS-fallback end-of-speech (only when we cannot capture audio for the VAD): a stable partial
      * this long + RMS quiet. v13: derived from the VAD hangover (default 0.5 s → 900 ms).

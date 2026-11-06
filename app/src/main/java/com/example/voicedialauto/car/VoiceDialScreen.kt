@@ -86,7 +86,7 @@ class VoiceDialScreen(carContext: CarContext, private val controller: DialContro
 
     /** What the root MessageTemplate actually draws for [s] (no countdown seconds, no mic restarts). */
     private fun renderKey(s: DialState): String = when (s) {
-        is DialState.Listening -> "L|${s.lang}|${s.partial.orEmpty()}"
+        is DialState.Listening -> "L|${s.lang}|${s.partial.orEmpty()}|${s.secondsLeft}"
         is DialState.Processing -> "P|${s.heard}"
         is DialState.Confirm -> "C|${s.entry.contactId}|${s.entry.number}|${s.secondsLeft}"
         is DialState.Choosing -> "CH"
@@ -142,11 +142,13 @@ class VoiceDialScreen(carContext: CarContext, private val controller: DialContro
             is DialState.Listening -> listeningTemplate(
                 title, s.lang,
                 live = s.partial?.takeIf { it.isNotBlank() }?.let { carContext.getString(R.string.car_heard, it) },
+                secondsLeft = s.secondsLeft,
             )
 
             is DialState.Processing -> listeningTemplate(
                 title, prefs.primaryLanguage,
                 live = carContext.getString(R.string.car_searching, s.heard),
+                secondsLeft = 0,
             )
 
             // Message text is stable (name only). Seconds live on the Cancel button = refresh, not a
@@ -219,12 +221,26 @@ class VoiceDialScreen(carContext: CarContext, private val controller: DialContro
         }
     }
 
-    private fun listeningTemplate(title: String, lang: String, live: String?): Template {
+    private fun listeningTemplate(title: String, lang: String, live: String?, secondsLeft: Int): Template {
         val b = MessageTemplate.Builder(bidi(carContext, carContext.getString(R.string.car_listening_lang, langLabel(lang))))
             .header(carContext, title, null)
             .setIcon(CarUi.icon(carContext, R.drawable.ic_mic, CarColor.RED))
+        val cancelTitle = if (secondsLeft > 0) {
+            carContext.getString(R.string.car_cancel_secs, secondsLeft)
+        } else {
+            carContext.getString(R.string.car_cancel)
+        }
+        // Cancel first (primary, stays put). "Heard: …" is the second action so hosts that
+        // stack buttons put it underneath instead of shoving Cancel aside.
+        b.addAction(
+            Action.Builder()
+                .setTitle(bidi(carContext, cancelTitle))
+                .setBackgroundColor(CarColor.RED)
+                .setFlags(Action.FLAG_PRIMARY)
+                .setOnClickListener { controller.cancel() }
+                .build(),
+        )
         if (live != null) b.addAction(secondary(live) { controller.recognizeAgain() })
-        b.addAction(secondary(R.string.car_cancel) { controller.cancel() })
         return b.build()
     }
 

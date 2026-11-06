@@ -60,10 +60,12 @@ class DialController(
     private var sessionStartedAt = 0L
     private var heardInSession = false
     private var deadline: Cancellable? = null
+    private var windowTick: Cancellable? = null
 
     private fun nameWindowMs() = (timings?.nameWindowMs ?: config.nameWindowMs).coerceIn(1_000, 600_000)
     private fun choiceWindowMs() = (timings?.choiceWindowMs ?: config.choiceWindowMs).coerceIn(1_000, 600_000)
     private fun countdownMs() = (timings?.countdownMs ?: config.countdownMs).coerceIn(0, 60_000)
+    private fun listCountdownMs() = (timings?.listCountdownMs ?: config.listCountdownMs).coerceIn(0, 60_000)
     private val autoGuard = RateLimiter(config.maxAutoStarts, config.autoStartWindowMs)
 
     private var opened = false
@@ -231,8 +233,11 @@ class DialController(
         }
     }
 
-    /** v12: tap on a row → exactly like a single match: countdown + "בטל התקשרות". */
-    fun pick(entry: ContactEntry) { userAction(); startCountdown(entry, null, prompts?.picked(entry.displayName)) }
+    /** Row tap on the list. Delay comes from [TimingSource.listCountdownMs] (default 0 = now). */
+    fun pick(entry: ContactEntry) {
+        userAction()
+        startCountdown(entry, null, prompts?.picked(entry.displayName), listCountdownMs())
+    }
 
     /** "Call now" during the countdown. */
     fun callNow() {
@@ -299,6 +304,29 @@ class DialController(
         transientRetries = 0
         deadline?.cancel()
         deadline = scheduler.post(lengthMs) { expireWindow(onExpired) }
+        scheduleWindowTick()
+    }
+
+    private fun listenSecondsLeft(): Int =
+        ceil((windowEnd - scheduler.now()).coerceAtLeast(0) / 1000.0).toInt()
+
+    /** Pushes remaining window seconds into Listening/Choosing so the UI can draw a countdown. */
+    private fun scheduleWindowTick() {
+        windowTick?.cancel()
+        val left = windowEnd - scheduler.now()
+        if (left <= 0) return
+        val rem = left % 1000L
+        val delay = if (rem == 0L) 1000L.coerceAtMost(left) else rem
+        windowTick = scheduler.post(delay) {
+            windowTick = null
+            val secs = listenSecondsLeft()
+            when (val s = state) {
+                is DialState.Listening -> set(s.copy(secondsLeft = secs))
+                is DialState.Choosing -> set(s.copy(secondsLeft = secs))
+                else -> return@post
+            }
+            if (secs > 0) scheduleWindowTick()
+        }
     }
 
     private fun expireWindow(onExpired: () -> Unit) {
@@ -333,7 +361,7 @@ class DialController(
         if (!continuation) FlowTimeline.begin(scheduler.now())
         val my = ++token
         val prefix = pendingFirst?.firstOrNull()
-        val shown = DialState.Listening(lang, prefix)
+        val shown = DialState.Listening(lang, prefix, if (continuation) 0 else listenSecondsLeft())
         if (state != shown) set(shown)
         markSessionStart()
         recognizerStarts++
@@ -358,7 +386,7 @@ class DialController(
                 }
                 if (state is DialState.Listening) {
                     val t = if (prefix != null && text.isNotBlank()) "$prefix $text" else (text.ifBlank { prefix ?: "" })
-                    set(DialState.Listening(lang, t.ifBlank { null }))
+                    set(DialState.Listening(lang, t.ifBlank { null }, listenSecondsLeft()))
                 }
             }
             override fun onLevel(rmsDb: Float) { onLevel?.invoke(rmsDb) }
@@ -395,6 +423,7 @@ class DialController(
     private fun beginContinuation(lang: String, hyp: List<String>) {
         FlowLog.d("flow", "[$matchSource] engine ended session after $hyp → continuation #${continuations + 1} (${config.continuationMs}ms)")
         deadline?.cancel(); deadline = null
+        windowTick?.cancel(); windowTick = null
         pendingFirst = combine(pendingFirst, hyp)
         continuations++
         FlowTimeline.mark("continuation$continuations", scheduler.now())
@@ -600,7 +629,7 @@ class DialController(
         val my = ++token
         val cur = state as? DialState.Choosing
         if (cur == null || cur.mic != MicState.LISTENING || cur.outOfRange != notice || cur.items != items)
-            set(DialState.Choosing(items, MicState.LISTENING, outOfRange = notice))
+            set(DialState.Choosing(items, MicState.LISTENING, outOfRange = notice, secondsLeft = listenSecondsLeft()))
         markSessionStart()
         recognizerStarts++
         val opts = ListenOptions(continuous = true, maxSessionMs = (windowEnd - scheduler.now()).coerceAtLeast(0))
@@ -612,7 +641,7 @@ class DialController(
                 if (mine.any { it.isLetterOrDigit() }) { heardInSession = true; bargeIn() }
                 val early = ChoiceResolver.resolveEarly(listOf(mine), items, matcher)
                 if (early != null) {
-                    startCountdown(early, mine, prompts?.picked(early.displayName))
+                    startCountdown(early, mine, prompts?.picked(early.displayName), listCountdownMs())
                     return
                 }
                 val s = state as? DialState.Choosing ?: return
@@ -634,7 +663,10 @@ class DialController(
                 bargeIn()
                 if (CancelDetector.isCancel(hypotheses)) { cancel(); return }
                 val pick = ChoiceResolver.resolve(hypotheses, items, matcher)
-                if (pick != null) { startCountdown(pick, hypotheses.first(), prompts?.picked(pick.displayName)); return }
+                if (pick != null) {
+                    startCountdown(pick, hypotheses.first(), prompts?.picked(pick.displayName), listCountdownMs())
+                    return
+                }
                 if (ChoiceResolver.nameTie(hypotheses, items, matcher)) {
                     FlowLog.d("flow", "[$matchSource] name $hypotheses fits several rows equally → ask for the number")
                     speakHint()
@@ -671,7 +703,7 @@ class DialController(
             // next session starts right away (posted, so we're out of the recognizer callback).
             val cur = state as? DialState.Choosing
             if (cur == null || cur.mic != MicState.LISTENING || cur.outOfRange != notice || cur.items != items)
-                set(DialState.Choosing(items, MicState.LISTENING, outOfRange = notice))
+                set(DialState.Choosing(items, MicState.LISTENING, outOfRange = notice, secondsLeft = listenSecondsLeft()))
             later(config.choiceRestartDelayMs, my) { startChoice(items, notice) }
         } else {
             stopAll()
@@ -686,10 +718,15 @@ class DialController(
      * places the call when the countdown ends (the car UI doesn't rely on Action.FLAG_DEFAULT);
      * the actions are "חייג עכשיו" and "בטל התקשרות"; hiding the app cancels it (onHidden).
      */
-    private fun startCountdown(entry: ContactEntry, heard: String?, prompt: String? = null) {
+    private fun startCountdown(
+        entry: ContactEntry,
+        heard: String?,
+        prompt: String? = null,
+        delayMs: Long = countdownMs(),
+    ) {
         stopAll()
         speech.pinDuck()
-        val total = countdownMs()
+        val total = delayMs
         if (total <= 0) { call(entry); return }
         val my = ++token
         set(confirmState(entry, heard, total, total))
@@ -785,6 +822,7 @@ class DialController(
         token++
         pending?.cancel(); pending = null
         deadline?.cancel(); deadline = null
+        windowTick?.cancel(); windowTick = null
         heardInSession = false
         speaker?.stop()
         speech.cancel()

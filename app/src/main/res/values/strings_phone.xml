@@ -33,6 +33,8 @@
     <string name="st_segmented">זיהוי רציף (Android 13 ומעלה)</string>
     <string name="st_segmented_sum">סשן זיהוי אחד שלא נסגר בהפסקה בין מילים (חני… כהן). אם הזיהוי לא עובד טוב, אפשר לכבות. בלי זה: סשן רגיל + המשך הקשבה קצר.</string>
     <string name="ph_cancel">ביטול</string>
+    <string name="ph_cancel_secs">ביטול (%1$d)</string>
+    <string name="ph_wait_secs">נותרו %1$d שנ׳</string>
     <string name="ph_call_now">חייג עכשיו</string>
     <string name="ph_countdown">מחייג בעוד %1$d…</string>
     <string name="ph_listen_again">הקשב שוב</string>
@@ -78,11 +80,14 @@
     <string name="st_name_window_sum">%1$s שניות – כמה זמן לחכות לשם במסך הראשי (כולל הפעלות מחדש בשקט)</string>
     <string name="st_list_window">משך הקשבה לבחירה מהרשימה</string>
     <string name="st_list_window_sum">%1$s שניות – כמה זמן לחכות ל\"אחת, שתיים…\" או לשם</string>
-    <string name="st_countdown">השהיה לפני חיוג אוטומטי</string>
-    <string name="st_countdown_sum">%1$s שניות – זמן לביטול לפני שהשיחה יוצאת</string>
-    <string name="st_countdown_zero">0 – חיוג מיידי, בלי ספירה לאחור</string>
+    <string name="st_countdown">השהיה אחרי התאמה אחת</string>
+    <string name="st_countdown_sum">%1$s שניות – אחרי שנמצא שם אחד במסך הראשי</string>
+    <string name="st_countdown_zero">0 – חיוג מיידי אחרי התאמה אחת</string>
+    <string name="st_list_countdown">השהיה אחרי בחירה מהרשימה</string>
+    <string name="st_list_countdown_sum">%1$s שניות – אחרי מספר, שם, או לחיצה על שורה</string>
+    <string name="st_list_countdown_zero">0 – חיוג מיידי מהרשימה (ברירת מחדל)</string>
     <string name="st_timing_reset">איפוס זמנים לברירת מחדל</string>
-    <string name="st_timing_reset_sum">10 שנ׳ לשם · 30 שנ׳ לרשימה · 3.5 שנ׳ לפני חיוג</string>
+    <string name="st_timing_reset_sum">10 שנ׳ לשם · 30 שנ׳ לרשימה · 5 שנ׳ להתאמה אחת · 0 לרשימה</string>
     <string name="st_cat_aa">הצגה ב-Android Auto</string>
     <string name="st_aa_status">סטטוס מקור ההתקנה</string>
     <string name="st_aa_status_ok">מוכן ל-Android Auto ✓\nמקור התקנה: Play (com.android.vending)\nיוזם: %1$s</string>
@@ -127,7 +132,7 @@
     <string name="st_hdr_timing">זמנים</string>
     <string name="st_hdr_timing_sum">משך הקשבה לשם ולרשימה</string>
     <string name="st_hdr_dial">חיוג</string>
-    <string name="st_hdr_dial_sum">השהיה לפני חיוג, ACTION_CALL</string>
+    <string name="st_hdr_dial_sum">השהיה אחרי התאמה אחת / אחרי הרשימה, ACTION_CALL</string>
     <string name="st_hdr_contacts">אנשי קשר</string>
     <string name="st_hdr_contacts_sum">סנכרון, מספר טעון, בדיקת התאמה</string>
     <string name="st_hdr_aa">הצגה ב-Android Auto</string>

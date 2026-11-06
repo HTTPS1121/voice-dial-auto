@@ -24,6 +24,8 @@
     <string name="car_recognize">זהה</string>
     <string name="car_recognize_again">זהה שוב</string>
     <string name="car_cancel">ביטול</string>
+    <string name="car_cancel_secs">ביטול (%1$d)</string>
+    <string name="car_wait_secs">%1$d שנ׳</string>
     <string name="car_call_now">חייג עכשיו</string>
     <string name="car_confirm">מחייג ל%1$s (%2$s)…</string>
     <string name="car_did_you_mean">אולי התכוונת ל…?</string>

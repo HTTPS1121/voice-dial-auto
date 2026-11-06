@@ -526,7 +526,9 @@ private fun CenterOrbView(
 ) {
     val statusText = when (state) {
         is DialState.Idle -> stringResource(R.string.ph_idle)
-        is DialState.Listening -> stringResource(R.string.ph_listening)
+        is DialState.Listening -> if (state.secondsLeft > 0) {
+            stringResource(R.string.ph_listening) + "  " + stringResource(R.string.ph_wait_secs, state.secondsLeft)
+        } else stringResource(R.string.ph_listening)
         is DialState.Processing -> stringResource(R.string.ph_searching)
         is DialState.Calling -> stringResource(R.string.ph_calling, state.entry.displayName)
         is DialState.NoMatch -> stringResource(R.string.ph_no_match_simple)
@@ -677,7 +679,11 @@ private fun CenterOrbView(
                         Icon(Icons.Rounded.Close, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            text = stringResource(R.string.ph_cancel),
+                            text = if (state.secondsLeft > 0) {
+                                stringResource(R.string.ph_cancel_secs, state.secondsLeft)
+                            } else {
+                                stringResource(R.string.ph_cancel)
+                            },
                             style = MaterialTheme.typography.titleMedium,
                         )
                     }
@@ -918,7 +924,13 @@ private fun ChoosingListView(
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            text = state.partial ?: stringResource(R.string.ph_choose_hint),
+            text = buildString {
+                append(state.partial ?: stringResource(R.string.ph_choose_hint))
+                if (state.secondsLeft > 0) {
+                    append('\n')
+                    append(stringResource(R.string.ph_wait_secs, state.secondsLeft))
+                }
+            },
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,

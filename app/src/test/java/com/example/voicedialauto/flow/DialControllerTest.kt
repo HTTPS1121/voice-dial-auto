@@ -88,6 +88,7 @@ class DialControllerTest {
         override var nameWindowMs: Long = DEFAULT_NAME_WINDOW_MS,
         override var choiceWindowMs: Long = DEFAULT_CHOICE_WINDOW_MS,
         override var countdownMs: Long = DEFAULT_COUNTDOWN_MS,
+        override var listCountdownMs: Long = 0,
     ) : TimingSource
 
     private var timings = FakeTimings()
@@ -132,6 +133,9 @@ class DialControllerTest {
     @Test fun openStartsListeningImmediately() {
         val c = controller(); c.onVisible()
         assertTrue(c.state is DialState.Listening); assertTrue(speech.listening)
+        assertEquals(10, (c.state as DialState.Listening).secondsLeft)
+        clock.advance(1000)
+        assertEquals(9, (c.state as DialState.Listening).secondsLeft)
     }
 
     @Test fun missingPermissionsShowsPermissionState() {
@@ -206,7 +210,16 @@ class DialControllerTest {
         assertTrue(!speech.listening)
     }
 
-    @Test fun spokenNumberPicksWithCountdown() {
+    @Test fun spokenNumberOnListCallsImmediately() {
+        val c = controller(); c.onVisible(); speech.say("תתקשר לדנה")
+        val items = (c.state as DialState.Choosing).items
+        speech.say("מספר שתיים")
+        assertEquals(items[1], called.single())
+        assertTrue(c.state is DialState.Calling)
+    }
+
+    @Test fun spokenNumberOnListCountsDownWhenConfigured() {
+        timings.listCountdownMs = 5_000
         val c = controller(); c.onVisible(); speech.say("תתקשר לדנה")
         val items = (c.state as DialState.Choosing).items
         speech.say("מספר שתיים")
@@ -222,16 +235,13 @@ class DialControllerTest {
         clock.advance(300); assertTrue(speech.listening)
     }
 
-    /** v12 (replaces tapOnRowCallsImmediately): a tapped row gets the same countdown as a single match. */
-    @Test fun tapOnRowStartsCountdownLikeSingleMatch() {
-        val sp = FakeSpeaker()
-        val c = controller(sp); c.onVisible(); speech.say("תתקשר לדנה")
+    @Test fun tapOnRowCallsImmediatelyByDefault() {
+        val c = controller(); c.onVisible(); speech.say("תתקשר לדנה")
         val items = (c.state as DialState.Choosing).items
         c.pick(items[0])
-        assertEquals(items[0], (c.state as DialState.Confirm).entry); assertTrue(called.isEmpty())
-        assertEquals("picked ${items[0].displayName}", sp.spoken.last())
+        assertEquals(items[0], called.single())
+        assertTrue(c.state is DialState.Calling)
         assertTrue(!speech.listening)
-        clock.advance(5_000); assertEquals(items[0], called.single())
     }
 
     @Test fun noMatchOffersSuggestions() {
@@ -297,8 +307,7 @@ class DialControllerTest {
         val sp = FakeSpeaker()
         val c = controller(sp); c.onVisible(); speech.say("תתקשר לדנה")
         speech.partial("שתיים")
-        assertTrue(c.state is DialState.Confirm)
-        assertTrue(sp.spoken.single().startsWith("picked "))
+        assertTrue(c.state is DialState.Calling)
         assertTrue(speech.duckPinned)
     }
 
@@ -306,13 +315,14 @@ class DialControllerTest {
         val c = controller(); c.onVisible(); speech.say("תתקשר לדנה")
         val items = (c.state as DialState.Choosing).items
         speech.partial("שתיים")
-        assertEquals(items[1], (c.state as DialState.Confirm).entry)
+        assertEquals(items[1], called.single())
+        assertTrue(c.state is DialState.Calling)
     }
 
     @Test fun spokenNameOnPartialPicksImmediately() {
         val c = controller(); c.onVisible(); speech.say("תתקשר לדנה")
         speech.partial("דנה כהן")
-        assertEquals("דנה כהן", (c.state as DialState.Confirm).entry.displayName)
+        assertEquals("דנה כהן", called.single().displayName)
     }
 
     @Test fun unmatchedListSpeechKeepsMicOpen() {
@@ -625,8 +635,8 @@ class DialControllerTest {
             assertTrue("mic dropped at $t", speech.listening || (c.state as DialState.Choosing).mic == MicState.LISTENING)
         }
         assertTrue(speech.starts - startsBefore >= 12)
-        // No state emission at all for back-to-back noise sessions (car: no template refresh).
-        assertTrue("emitted ${emitted.size}", emitted.isEmpty())
+        // Window-second ticks refresh the countdown; mic/rows must stay LISTENING (car: still a refresh).
+        assertTrue(emitted.all { it is DialState.Choosing && it.mic == MicState.LISTENING })
         assertEquals(1, speech.maxConcurrent)
         clock.advance(5_000); if (speech.listening) speech.silence()
         clock.advance(1_000)
@@ -657,7 +667,7 @@ class DialControllerTest {
         speech.partial("…")
         assertTrue(c.state is DialState.Choosing)
         speech.partial("שתיים")
-        assertTrue(c.state is DialState.Confirm)
+        assertTrue(c.state is DialState.Calling)
     }
 
     // ---------------------------------------------------------------- v11: first name only, async match, no reload
@@ -786,13 +796,13 @@ class DialControllerTest {
         assertTrue(!sp.speaking); clock.advance(10_000); assertTrue(called.isEmpty())
     }
 
-    @Test fun spokenNumberSaysPickedAndCountsDown() {
+    @Test fun spokenNumberOnListCallsWithoutPickedPrompt() {
         val sp = FakeSpeaker()
         val c = controller(sp); c.onVisible(); speech.say("תתקשר לדנה")
         val items = (c.state as DialState.Choosing).items
         speech.say("שתיים")
-        assertEquals("picked ${items[1].displayName}", sp.spoken.last())
-        assertEquals(items[1], (c.state as DialState.Confirm).entry)
+        assertTrue(sp.spoken.none { it.startsWith("picked ") })
+        assertEquals(items[1], called.single())
     }
 
     // ---------------------------------------------------------------- v12: continuation after an engine cut
@@ -861,7 +871,7 @@ class DialControllerTest {
         val c = controller(sp); c.onVisible(); speech.say("תתקשר לדנה")
         val items = (c.state as DialState.Choosing).items
         speech.say("נמצאו כמה שמות נא להגיד את מספר התוצאה הרצוי שתיים")
-        assertEquals(items[1], (c.state as DialState.Confirm).entry)
+        assertEquals(items[1], called.single())
     }
 
     @Test fun echoOnlyRelistensImmediatelyWithMicOn() {
@@ -916,7 +926,7 @@ class DialControllerTest {
         val c = controller(list = hanni); c.onVisible(); speech.say("חני")
         val items = (c.state as DialState.Choosing).items
         speech.say("חני לוי")
-        assertEquals("חני לוי", (c.state as DialState.Confirm).entry.displayName)
+        assertEquals("חני לוי", called.single().displayName)
         assertTrue(items.any { it.displayName == "חני לוי" })
     }
 
@@ -931,7 +941,7 @@ class DialControllerTest {
         clock.advance(DialConfig().choiceRestartDelayMs + 1); assertTrue(speech.listening)
         // the hint's echo + the number → picked
         speech.say("נא לומר מספר שתיים")
-        assertEquals(rows[1], (c.state as DialState.Confirm).entry)
+        assertEquals(rows[1], called.single())
     }
 
     @Test fun twoWordEngineResultSkipsContinuation() {
