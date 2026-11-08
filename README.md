@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version" src="https://img.shields.io/badge/version-0.16--v16-4C6EF5?style=for-the-badge" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.18--v16-4C6EF5?style=for-the-badge" />
   <img alt="Android 8+" src="https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=for-the-badge&logo=android&logoColor=white" />
   <img alt="Kotlin" src="https://img.shields.io/badge/Kotlin-2.2-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white" />
   <img alt="Android Auto" src="https://img.shields.io/badge/Android%20Auto-Car%20App-4285F4?style=for-the-badge&logo=androidauto&logoColor=white" />
@@ -42,15 +42,15 @@ flowchart LR
   C -->|one name| D[Countdown]
   C -->|several| E[Numbered list]
   C -->|none| F[Try again]
-  E -->|say 2 / tap row| D
-  D -->|Call now or timer| G[Phone call]
+  E -->|say 2 / tap row| G[Phone call]
+  D -->|Call now or timer| G
 ```
 
 | What happens | What you do |
 |---|---|
 | App opens | Nothing — the mic is already live |
 | One contact matches | 5s countdown. **Call now** or **Cancel** |
-| Several contacts match | Numbered list, mic still open. Say *«two»* / *«שתיים»* or the name |
+| Several contacts match | Numbered list, mic still open. Say *«two»* / tap a row — call now (delay is a setting) |
 | Music is playing | It **ducks**, it does not pause — same idea as Waze guidance |
 | You misspeak | **Start listening again**. No auto-restart after a no-match |
 
@@ -118,7 +118,7 @@ Android Auto only shows Car App Library apps that look like they came from **Pla
 
 ### 1. Install Voice Dial
 
-Download [**VoiceDial-0.16-v16.apk**](https://github.com/HTTPS1121/voice-dial-auto/releases/latest) → open on the phone (unknown sources) → grant **microphone**, **contacts**, **phone**.
+Download [**VoiceDial-0.18-v16.apk**](https://github.com/HTTPS1121/voice-dial-auto/releases/latest) → open on the phone (unknown sources) → grant **microphone**, **contacts**, **phone**.
 
 ### 2. Install Shizuku
 
@@ -248,7 +248,7 @@ Phone UI and car UI only **render** `DialState`. Behavior lives in `DialControll
 |---|---|
 | האפליקציה נפתחת | כלום — המיקרופון כבר חי |
 | התאמה אחת | ספירה 5 שנ׳. **חייג עכשיו** או **בטל התקשרות** |
-| כמה התאמות | רשימה ממוספרת, מיקרופון פתוח. אומרים «שתיים» / «two» או את השם |
+| כמה התאמות | רשימה ממוספרת, מיקרופון פתוח. אומרים «שתיים» / לוחצים על שורה — חיוג מיידי (השהיה בהגדרות) |
 | יש מוזיקה | היא **יורדת**, לא נעצרת — כמו הנחיות וייז |
 | פספוס | **התחל האזנה שוב**. אחרי «לא נמצא» אין הפעלה אוטומטית |
 
@@ -297,7 +297,7 @@ Phone UI and car UI only **render** `DialState`. Behavior lives in `DialControll
 
 ### 1. מתקינים את חיוג קולי
 
-מורידים [**VoiceDial-0.16-v16.apk**](https://github.com/HTTPS1121/voice-dial-auto/releases/latest) > פותחים בטלפון (מקור לא ידוע) > מאשרים **מיקרופון**, **אנשי קשר**, **טלפון**.
+מורידים [**VoiceDial-0.18-v16.apk**](https://github.com/HTTPS1121/voice-dial-auto/releases/latest) > פותחים בטלפון (מקור לא ידוע) > מאשרים **מיקרופון**, **אנשי קשר**, **טלפון**.
 
 ### 2. מתקינים Shizuku
 
