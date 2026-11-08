@@ -24,7 +24,7 @@ import com.example.voicedialauto.util.Prefs
  * Header mic shows listening vs off. v9: the mic opens the
  * moment the list appears and stays red for the whole list window (restarts included); the
  * optional short TTS prompt plays over the open mic (barge-in).
- * Row tap = call immediately. Spoken number/name → countdown from Settings (default 3.5 s, 0 = none) (handled by DialController).
+ * Row tap / spoken number: delay from Settings list countdown (default 0 = call now).
  */
 class ContactListScreen(carContext: CarContext, private val controller: DialController) : Screen(carContext) {
 

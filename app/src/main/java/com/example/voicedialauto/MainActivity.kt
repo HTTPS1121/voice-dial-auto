@@ -148,6 +148,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         prefs = Prefs(this)
+        runCatching { VoiceDialApp.instance.cancelLeftoverPrompt() }
         FileLog.log("lifecycle", "phone MainActivity onCreate", "phone")
         recognizer = VoiceRecognizer(
             this, null,
@@ -169,6 +170,7 @@ class MainActivity : ComponentActivity() {
             worker = BackgroundWorker,
             speaker = tts,
             prompts = ResPrompts(this),
+            continueWhenHidden = { prefs.continueWhenHidden },
         )
         controller.matchSource = "phone"
         interruptions = InterruptionMonitor(this) { controller.onInterrupted() }
@@ -251,8 +253,19 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        recognizer.destroy()
-        tts.shutdown()
+        val calling = controller.state is DialState.Calling
+        val keptTts = runCatching {
+            VoiceDialApp.instance.takeLeftoverPrompt(
+                controller,
+                prefs.continueWhenHidden,
+                tts,
+                ResPrompts(this).noMatch(),
+                prefs.primaryLanguage,
+            )
+        }.getOrDefault(false)
+        controller.onDestroyed()
+        recognizer.destroy(keepDuck = calling)
+        if (!keptTts) tts.shutdown()
         super.onDestroy()
     }
 

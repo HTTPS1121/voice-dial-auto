@@ -49,6 +49,8 @@ data class DialConfig(
     val nameWindowMs: Long = DEFAULT_NAME_WINDOW_MS,
     val choiceWindowMs: Long = DEFAULT_CHOICE_WINDOW_MS,
     val countdownMs: Long = DEFAULT_COUNTDOWN_MS,
+    /** After a list pick (row / spoken number). 0 = call immediately. */
+    val listCountdownMs: Long = DEFAULT_LIST_COUNTDOWN_MS,
     /**
      * A recognizer session that ended (silence/error) faster than this is a "fast failure"
      * (error storm, recognizer refusing). Only [maxFastRestarts] of those per request are restarted,
@@ -101,6 +103,7 @@ data class DialConfig(
 const val DEFAULT_NAME_WINDOW_MS = 10_000L
 const val DEFAULT_CHOICE_WINDOW_MS = 30_000L
 const val DEFAULT_COUNTDOWN_MS = 5_000L
+const val DEFAULT_LIST_COUNTDOWN_MS = 0L
 
 /** "Restart on silence" budget: at most [maxRestarts] restarts and only within [windowMs] since [begin]. */
 class RestartPolicy(private val windowMs: Long, private val maxRestarts: Int) {

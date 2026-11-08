@@ -619,7 +619,11 @@ class VoiceRecognizer(
         releaseWarm()
     }
 
-    fun destroy() { duckPinned = false; cancel(); destroyPending() }
+    fun destroy(keepDuck: Boolean = false) {
+        if (!keepDuck) duckPinned = false
+        cancel()
+        destroyPending()
+    }
 
     companion object {
         private const val TAG = "VoiceRecognizer"

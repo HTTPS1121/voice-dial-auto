@@ -96,6 +96,8 @@ interface TimingSource {
     val choiceWindowMs: Long
     /** Delay before an automatic call; 0 = call immediately. Default 5 s (v12). */
     val countdownMs: Long
+    /** After a list pick (row / spoken number). 0 = call immediately. */
+    val listCountdownMs: Long get() = 0
     /**
      * RMS-fallback end-of-speech (only when we cannot capture audio for the VAD): a stable partial
      * this long + RMS quiet. v13: derived from the VAD hangover (default 0.5 s → 900 ms).

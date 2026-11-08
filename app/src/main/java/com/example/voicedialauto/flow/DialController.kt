@@ -42,6 +42,8 @@ class DialController(
     private val timings: TimingSource? = null,
     /** v11: matching runs here (Android: background thread; tests: inline). */
     private val worker: Worker = Worker.Inline,
+    /** When false (default), leaving the UI stops the session. A live outgoing call is never cancelled. */
+    private val continueWhenHidden: () -> Boolean = { false },
 ) {
     var state: DialState = DialState.Idle()
         private set
@@ -64,6 +66,7 @@ class DialController(
     private fun nameWindowMs() = (timings?.nameWindowMs ?: config.nameWindowMs).coerceIn(1_000, 600_000)
     private fun choiceWindowMs() = (timings?.choiceWindowMs ?: config.choiceWindowMs).coerceIn(1_000, 600_000)
     private fun countdownMs() = (timings?.countdownMs ?: config.countdownMs).coerceIn(0, 60_000)
+    private fun listCountdownMs() = (timings?.listCountdownMs ?: config.listCountdownMs).coerceIn(0, 60_000)
     private val autoGuard = RateLimiter(config.maxAutoStarts, config.autoStartWindowMs)
 
     private var opened = false
@@ -76,6 +79,8 @@ class DialController(
     private var pending: Cancellable? = null // countdown tick or delayed restart
     private var suppressNextVisible = false
     private var hideTask: Cancellable? = null
+    /** Set when a real hide stopped the session; next onVisible stays Idle until a user action. */
+    private var stoppedOnHide = false
     private var duckHold: Cancellable? = null
     /** True after [commitHide] actually released the mic. False if hide was only scheduled. */
     private var hideCommitted = false
@@ -116,6 +121,11 @@ class DialController(
         val missing = permissions()
         if (missing.isNotEmpty()) { set(DialState.NeedsPermissions(missing)); return }
 
+        if (stoppedOnHide) {
+            emit()
+            return
+        }
+
         val s = state
         val lang = languages.primaryLanguage
         val longAway = away >= config.minAwayForAutoListenMs
@@ -142,6 +152,27 @@ class DialController(
         }
     }
 
+    /** Milliseconds left in the current listen window (0 if none). */
+    fun remainingWindowMs(): Long = (windowEnd - scheduler.now()).coerceAtLeast(0L)
+
+    /**
+     * Session/activity is gone. Always stop listen/TTS unless an outgoing call is in flight —
+     * the host tears the car session down as soon as dialing starts.
+     */
+    fun onDestroyed() {
+        hideTask?.cancel(); hideTask = null
+        visible = false
+        hideCommitted = true
+        if (state is DialState.Calling) {
+            stopSpeech()
+            return
+        }
+        stopAll()
+        dropDuck()
+        stoppedOnHide = true
+        set(DialState.Idle(lastCalledName))
+    }
+
     /** App/screen hidden: release mic and TTS, cancel a pending countdown. Idempotent. */
     fun onHidden() {
         if (!visible) return
@@ -155,18 +186,29 @@ class DialController(
 
     private fun commitHide() {
         hideCommitted = true
-        stopAll()
-        // Placing a call stops the car session; don't unduck or media slams back before telephony.
-        if (state !is DialState.Calling) dropDuck()
         when (val s = state) {
-            is DialState.Confirm -> set(DialState.Idle())
-            is DialState.Choosing -> set(s.copy(mic = MicState.OFF, partial = null))
-            else -> Unit // Listening/Processing resume in onVisible()
+            is DialState.Calling -> {
+                // Host tears the car session down when the phone call starts. Keep the call + duck.
+                stopSpeech()
+            }
+            else -> if (continueWhenHidden()) {
+                stopSpeech()
+                when (s) {
+                    is DialState.Confirm -> { dropDuck(); set(DialState.Idle()) }
+                    is DialState.Choosing -> set(s.copy(mic = MicState.OFF, partial = null))
+                    else -> emit()
+                }
+            } else {
+                stopAll()
+                dropDuck()
+                stoppedOnHide = true
+                set(DialState.Idle(lastCalledName))
+            }
         }
     }
 
     /**
-     * v9: phone call ringing/off-hook (or audio mode RINGTONE/IN_CALL) → stop TTS and recognition
+     * v9: phone call ringing/off-hook (or audio mode RINGTONE/IN_CALL) -> stop TTS and recognition
      * IMMEDIATELY and go idle. No automatic listening afterwards until the user acts (tap / launcher).
      * Our own outgoing call (state [DialState.Calling]) only releases the mic and keeps its state.
      */
@@ -232,7 +274,10 @@ class DialController(
     }
 
     /** v12: tap on a row → exactly like a single match: countdown + "בטל התקשרות". */
-    fun pick(entry: ContactEntry) { userAction(); startCountdown(entry, null, prompts?.picked(entry.displayName)) }
+    fun pick(entry: ContactEntry) {
+        userAction()
+        startCountdown(entry, null, prompts?.picked(entry.displayName), listCountdownMs())
+    }
 
     /** "Call now" during the countdown. */
     fun callNow() {
@@ -251,7 +296,7 @@ class DialController(
         contacts.refresh { list -> onDone(list.size) }
     }
 
-    private fun userAction() { autoGuard.reset(); holdAutoListen = false }
+    private fun userAction() { autoGuard.reset(); holdAutoListen = false; stoppedOnHide = false }
 
     // ------------------------------------------------------------------ name lookup
 
@@ -265,7 +310,9 @@ class DialController(
         }
         speech.pinDuck()
         beginWindow(nameWindowMs()) {
-            if (state is DialState.Listening) { stopAll(); enterNoMatch(DialState.NoMatch("", emptyList())) }
+            if (state is DialState.Listening || state is DialState.Processing) {
+                stopAll(); enterNoMatch(DialState.NoMatch("", emptyList()))
+            }
         }
         contacts.ensureFresh() // v11: reload only if empty / stale / changed (was: full reload every time)
         pendingFirst = null
@@ -612,7 +659,7 @@ class DialController(
                 if (mine.any { it.isLetterOrDigit() }) { heardInSession = true; bargeIn() }
                 val early = ChoiceResolver.resolveEarly(listOf(mine), items, matcher)
                 if (early != null) {
-                    startCountdown(early, mine, prompts?.picked(early.displayName))
+                    startCountdown(early, mine, prompts?.picked(early.displayName), listCountdownMs())
                     return
                 }
                 val s = state as? DialState.Choosing ?: return
@@ -634,7 +681,10 @@ class DialController(
                 bargeIn()
                 if (CancelDetector.isCancel(hypotheses)) { cancel(); return }
                 val pick = ChoiceResolver.resolve(hypotheses, items, matcher)
-                if (pick != null) { startCountdown(pick, hypotheses.first(), prompts?.picked(pick.displayName)); return }
+                if (pick != null) {
+                    startCountdown(pick, hypotheses.first(), prompts?.picked(pick.displayName), listCountdownMs())
+                    return
+                }
                 if (ChoiceResolver.nameTie(hypotheses, items, matcher)) {
                     FlowLog.d("flow", "[$matchSource] name $hypotheses fits several rows equally → ask for the number")
                     speakHint()
@@ -686,10 +736,15 @@ class DialController(
      * places the call when the countdown ends (the car UI doesn't rely on Action.FLAG_DEFAULT);
      * the actions are "חייג עכשיו" and "בטל התקשרות"; hiding the app cancels it (onHidden).
      */
-    private fun startCountdown(entry: ContactEntry, heard: String?, prompt: String? = null) {
+    private fun startCountdown(
+        entry: ContactEntry,
+        heard: String?,
+        prompt: String? = null,
+        delayMs: Long = countdownMs(),
+    ) {
         stopAll()
         speech.pinDuck()
-        val total = countdownMs()
+        val total = delayMs
         if (total <= 0) { call(entry); return }
         val my = ++token
         set(confirmState(entry, heard, total, total))
@@ -781,13 +836,18 @@ class DialController(
         return scheduler.now() - t < config.afterCallQuietMs
     }
 
-    private fun stopAll() {
+    /** Mic/TTS only — leave the listen-window timer so a background session can still expire. */
+    private fun stopSpeech() {
         token++
         pending?.cancel(); pending = null
-        deadline?.cancel(); deadline = null
         heardInSession = false
         speaker?.stop()
         speech.cancel()
+    }
+
+    private fun stopAll() {
+        stopSpeech()
+        deadline?.cancel(); deadline = null
     }
 
     private var lastLogged: String? = null

@@ -73,6 +73,7 @@ import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Verified
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -769,13 +770,17 @@ private fun DialSubScreen(
     onChanged: () -> Unit,
 ) {
     var countdownHalf by remember { mutableIntStateOf(prefs.countdownHalfSeconds) }
+    var listCountdownHalf by remember { mutableIntStateOf(prefs.listCountdownHalfSeconds) }
     var actionCall by remember { mutableStateOf(prefs.useActionCall) }
+    var continueWhenHidden by remember { mutableStateOf(prefs.continueWhenHidden) }
 
-    val halfFormatted = if (countdownHalf % 2 == 0) {
-        (countdownHalf / 2).toString()
+    fun halfLabel(half: Int) = if (half % 2 == 0) {
+        (half / 2).toString()
     } else {
-        String.format(Locale.US, "%.1f", countdownHalf / 2.0)
+        String.format(Locale.US, "%.1f", half / 2.0)
     }
+    val halfFormatted = halfLabel(countdownHalf)
+    val listHalfFormatted = halfLabel(listCountdownHalf)
 
     Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
         SettingsGroup(title = stringResource(R.string.st_hdr_dial)) {
@@ -795,6 +800,36 @@ private fun DialSubScreen(
                     val v = it.roundToInt()
                     countdownHalf = v
                     prefs.countdownHalfSeconds = v
+                    onChanged()
+                },
+            )
+            SettingsSliderTile(
+                title = stringResource(R.string.st_list_countdown),
+                valueLabel = if (listCountdownHalf == 0) "מיידי" else "$listHalfFormatted שנ׳",
+                subtitle = if (listCountdownHalf == 0) {
+                    stringResource(R.string.st_list_countdown_zero)
+                } else {
+                    stringResource(R.string.st_list_countdown_sum, listHalfFormatted)
+                },
+                icon = Icons.Rounded.HourglassBottom,
+                value = listCountdownHalf.toFloat(),
+                valueRange = 0f..Prefs.COUNTDOWN_MAX_HALF_S.toFloat(),
+                steps = Prefs.COUNTDOWN_MAX_HALF_S - 1,
+                onValueChange = {
+                    val v = it.roundToInt()
+                    listCountdownHalf = v
+                    prefs.listCountdownHalfSeconds = v
+                    onChanged()
+                },
+            )
+            SettingsSwitchTile(
+                title = stringResource(R.string.st_continue_hidden),
+                subtitle = stringResource(R.string.st_continue_hidden_sum),
+                icon = Icons.Rounded.VisibilityOff,
+                checked = continueWhenHidden,
+                onCheckedChange = {
+                    continueWhenHidden = it
+                    prefs.continueWhenHidden = it
                     onChanged()
                 },
             )

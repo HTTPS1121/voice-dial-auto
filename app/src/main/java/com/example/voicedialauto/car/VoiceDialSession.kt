@@ -14,6 +14,7 @@ import com.example.voicedialauto.flow.CachedContactsSource
 import com.example.voicedialauto.flow.Caller
 import com.example.voicedialauto.flow.DialConfig
 import com.example.voicedialauto.flow.DialController
+import com.example.voicedialauto.flow.DialState
 import com.example.voicedialauto.flow.MainThreadScheduler
 import com.example.voicedialauto.flow.ResPrompts
 import com.example.voicedialauto.util.FileLog
@@ -32,7 +33,9 @@ class VoiceDialSession : Session() {
     private lateinit var controller: DialController
 
     override fun onCreateScreen(intent: Intent): Screen {
-        val appCtx = runCatching { VoiceDialApp.instance }.getOrElse { carContext.applicationContext }
+        val app = runCatching { VoiceDialApp.instance }.getOrNull()
+        app?.cancelLeftoverPrompt()
+        val appCtx = app ?: carContext.applicationContext
         val prefs = Prefs(appCtx)
         FileLog.log("lifecycle", "car session onCreateScreen carApi=${carContext.carAppApiLevel}", "car")
         val recognizer = VoiceRecognizer(
@@ -56,6 +59,7 @@ class VoiceDialSession : Session() {
             prompts = ResPrompts(carContext),
             timings = prefs,
             worker = BackgroundWorker,
+            continueWhenHidden = { prefs.continueWhenHidden },
         )
         controller.matchSource = "car"
         val interruptions = InterruptionMonitor(carContext) { controller.onInterrupted() }
@@ -69,13 +73,24 @@ class VoiceDialSession : Session() {
                 controller.onVisible()
             }
             override fun onStop(owner: LifecycleOwner) {
-                FileLog.log("lifecycle", "car session onStop → cancel countdown / mic / TTS", "car")
+                FileLog.log("lifecycle", "car session onStop -> hide", "car")
                 controller.onHidden()
                 interruptions.stop()
             }
             override fun onDestroy(owner: LifecycleOwner) {
                 FileLog.log("lifecycle", "car session onDestroy", "car")
-                interruptions.stop(); recognizer.destroy(); tts.shutdown()
+                interruptions.stop()
+                val calling = controller.state is DialState.Calling
+                val keptTts = app?.takeLeftoverPrompt(
+                    controller,
+                    prefs.continueWhenHidden,
+                    tts,
+                    ResPrompts(carContext).noMatch(),
+                    prefs.primaryLanguage,
+                ) == true
+                controller.onDestroyed()
+                recognizer.destroy(keepDuck = calling)
+                if (!keptTts) tts.shutdown()
             }
         })
         ContactsCache.refresh(appCtx) { list ->

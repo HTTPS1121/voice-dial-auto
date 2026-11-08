@@ -73,6 +73,13 @@ class Prefs(context: Context) : LanguageSource, TimingSource {
         get() = sp.getInt(KEY_LIST_WINDOW_S, LIST_WINDOW_DEFAULT_S).coerceIn(LIST_WINDOW_MIN_S, LIST_WINDOW_MAX_S) * 1000L
     override val countdownMs: Long
         get() = sp.getInt(KEY_COUNTDOWN_HALF_S, COUNTDOWN_DEFAULT_HALF_S).coerceIn(0, COUNTDOWN_MAX_HALF_S) * 500L
+    override val listCountdownMs: Long
+        get() = sp.getInt(KEY_LIST_COUNTDOWN_HALF_S, LIST_COUNTDOWN_DEFAULT_HALF_S).coerceIn(0, COUNTDOWN_MAX_HALF_S) * 500L
+
+    /** Keep the listen window after leaving the car/phone UI. Default off: hide stops everything. */
+    var continueWhenHidden: Boolean
+        get() = sp.getBoolean(KEY_CONTINUE_WHEN_HIDDEN, false)
+        set(v) = sp.edit().putBoolean(KEY_CONTINUE_WHEN_HIDDEN, v).apply()
 
     /**
      * v13: end-of-speech by a real VAD (Silero; WebRTC fallback). Sensitivity = probability
@@ -123,6 +130,10 @@ class Prefs(context: Context) : LanguageSource, TimingSource {
         get() = sp.getInt(KEY_COUNTDOWN_HALF_S, COUNTDOWN_DEFAULT_HALF_S).coerceIn(0, COUNTDOWN_MAX_HALF_S)
         set(v) = sp.edit().putInt(KEY_COUNTDOWN_HALF_S, v.coerceIn(0, COUNTDOWN_MAX_HALF_S)).apply()
 
+    var listCountdownHalfSeconds: Int
+        get() = sp.getInt(KEY_LIST_COUNTDOWN_HALF_S, LIST_COUNTDOWN_DEFAULT_HALF_S).coerceIn(0, COUNTDOWN_MAX_HALF_S)
+        set(v) = sp.edit().putInt(KEY_LIST_COUNTDOWN_HALF_S, v.coerceIn(0, COUNTDOWN_MAX_HALF_S)).apply()
+
     var vadSensitivityKey: String
         get() = sp.getString(KEY_VAD_SENSITIVITY, "normal") ?: "normal"
         set(v) = sp.edit().putString(KEY_VAD_SENSITIVITY, v).apply()
@@ -137,6 +148,7 @@ class Prefs(context: Context) : LanguageSource, TimingSource {
             .putInt(KEY_NAME_WINDOW_S, NAME_WINDOW_DEFAULT_S)
             .putInt(KEY_LIST_WINDOW_S, LIST_WINDOW_DEFAULT_S)
             .putInt(KEY_COUNTDOWN_HALF_S, COUNTDOWN_DEFAULT_HALF_S)
+            .putInt(KEY_LIST_COUNTDOWN_HALF_S, LIST_COUNTDOWN_DEFAULT_HALF_S)
             .apply()
     }
 
@@ -158,6 +170,9 @@ class Prefs(context: Context) : LanguageSource, TimingSource {
         const val KEY_NAME_WINDOW_S = "name_window_s"
         const val KEY_LIST_WINDOW_S = "list_window_s"
         const val KEY_COUNTDOWN_HALF_S = "countdown_half_s"
+        const val KEY_LIST_COUNTDOWN_HALF_S = "list_countdown_half_s"
+        private const val KEY_CONTINUE_WHEN_HIDDEN = "continue_when_hidden"
+        const val LIST_COUNTDOWN_DEFAULT_HALF_S = 0
         val NAME_WINDOW_DEFAULT_S = (DEFAULT_NAME_WINDOW_MS / 1000).toInt()   // 10
         const val NAME_WINDOW_MIN_S = 5
         const val NAME_WINDOW_MAX_S = 60

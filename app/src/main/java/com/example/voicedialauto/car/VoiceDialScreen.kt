@@ -223,8 +223,25 @@ class VoiceDialScreen(carContext: CarContext, private val controller: DialContro
         val b = MessageTemplate.Builder(bidi(carContext, carContext.getString(R.string.car_listening_lang, langLabel(lang))))
             .header(carContext, title, null)
             .setIcon(CarUi.icon(carContext, R.drawable.ic_mic, CarColor.RED))
-        if (live != null) b.addAction(secondary(live) { controller.recognizeAgain() })
-        b.addAction(secondary(R.string.car_cancel) { controller.cancel() })
+        // Cancel first and primary so it stays full-width on top. Heard is a second full action
+        // (same kind of filled button) so hosts stack it underneath instead of shoving Cancel aside.
+        b.addAction(
+            Action.Builder()
+                .setTitle(bidi(carContext, carContext.getString(R.string.car_cancel)))
+                .setBackgroundColor(CarColor.RED)
+                .setFlags(Action.FLAG_PRIMARY)
+                .setOnClickListener { controller.cancel() }
+                .build(),
+        )
+        if (live != null) {
+            b.addAction(
+                Action.Builder()
+                    .setTitle(bidi(carContext, live))
+                    .setBackgroundColor(CarColor.BLUE)
+                    .setOnClickListener { controller.recognizeAgain() }
+                    .build(),
+            )
+        }
         return b.build()
     }
 
