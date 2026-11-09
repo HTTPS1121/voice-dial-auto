@@ -48,6 +48,9 @@ object ContactsCache {
     /** Duration of the last ContactsContract load + index build (ms), for the debug log. */
     @Volatile var lastLoadMs: Long = 0L
         private set
+    /** First names shared by multiple contacts — holds fast endpointing until a surname is heard. */
+    @Volatile var ambiguousFirstNames: Set<String> = emptySet()
+        private set
     @Volatile private var dirty = false
     @Volatile private var observing = false
     const val MAX_AGE_MS = 10 * 60_000L
@@ -138,7 +141,10 @@ object ContactsCache {
                 restartGen = generation.get()
                 loading = true
             } else {
-                if (list.isNotEmpty() || snapshot.isNullOrEmpty()) snapshot = list
+                if (list.isNotEmpty() || snapshot.isNullOrEmpty()) {
+                    snapshot = list
+                    ambiguousFirstNames = NameCompletenessGate.ambiguousFirstNames(list)
+                }
                 lastSyncElapsedMs = SystemClock.elapsedRealtime()
                 loading = false
                 pending = waiters.toList()
@@ -157,6 +163,7 @@ object ContactsCache {
     internal fun resetForTests() {
         synchronized(waiters) {
             snapshot = null
+            ambiguousFirstNames = emptySet()
             loading = false
             generation.set(0)
             waiters.clear()
@@ -168,6 +175,7 @@ object ContactsCache {
     internal fun seedForTests(list: List<ContactEntry>) {
         synchronized(waiters) {
             snapshot = list
+            ambiguousFirstNames = NameCompletenessGate.ambiguousFirstNames(list)
             loading = false
             lastSyncElapsedMs = SystemClock.elapsedRealtime()
         }
