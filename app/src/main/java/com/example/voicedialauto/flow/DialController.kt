@@ -33,6 +33,7 @@ class DialController(
     private val speech: SpeechInput,
     private val contacts: ContactsSource,
     private val caller: Caller,
+    private val callProbe: CallStateProbe? = null,
     private val scheduler: Scheduler,
     private val permissions: () -> List<String>,
     private val languages: LanguageSource,
@@ -76,7 +77,11 @@ class DialController(
     private var lastCalledName: String? = null
     private var transientRetries = 0
     private var token = 0
-    private var pending: Cancellable? = null // countdown tick or delayed restart
+    private var pending: Cancellable? = null // delayed restart / continuation
+    private var countdownTask: Cancellable? = null
+    private var callVerifyTask: Cancellable? = null
+    private var placementAttempt = 0
+    private var placementEverActive = false
     private var suppressNextVisible = false
     private var hideTask: Cancellable? = null
     /** Set when a real hide stopped the session; next onVisible stays Idle until a user action. */
@@ -191,10 +196,13 @@ class DialController(
                 // Host tears the car session down when the phone call starts. Keep the call + duck.
                 stopSpeech()
             }
+            is DialState.Confirm -> {
+                // Countdown must survive hide — do not bump [token] (would cancel the countdown ticks).
+                emit()
+            }
             else -> if (continueWhenHidden()) {
                 stopSpeech()
                 when (s) {
-                    is DialState.Confirm -> { dropDuck(); set(DialState.Idle()) }
                     is DialState.Choosing -> set(s.copy(mic = MicState.OFF, partial = null))
                     else -> emit()
                 }
@@ -759,10 +767,12 @@ class DialController(
     private fun scheduleTick(my: Int, entry: ContactEntry, heard: String?, remaining: Long, total: Long) {
         val frac = remaining % 1000
         val step = if (frac == 0L) 1000L.coerceAtMost(remaining) else frac
-        pending = scheduler.post(step) {
+        countdownTask?.cancel()
+        countdownTask = scheduler.post(step) {
+            countdownTask = null
             if (my != token || state !is DialState.Confirm) return@post
             val left = remaining - step
-            if (left <= 0) { pending = null; call(entry) }
+            if (left <= 0) call(entry)
             else { set(confirmState(entry, heard, left, total)); scheduleTick(my, entry, heard, left, total) }
         }
     }
@@ -770,16 +780,63 @@ class DialController(
     private fun call(entry: ContactEntry) {
         FlowLog.d("flow", "[$matchSource] placing call → ${entry.displayName} ${entry.number}")
         ++token
+        countdownTask?.cancel(); countdownTask = null
+        callVerifyTask?.cancel(); callVerifyTask = null
         lastCallAt = scheduler.now()
         lastCalledName = entry.displayName
         set(DialState.Calling(entry))
+        placementAttempt = 0
+        placementEverActive = false
+        launchCallAttempt(entry)
+    }
+
+    private fun launchCallAttempt(entry: ContactEntry) {
+        val attempt = placementAttempt
+        FlowLog.d("flow", "[$matchSource] call launch attempt ${attempt + 1}/${config.callPlacement.maxAttempts}")
         if (!caller.call(entry)) {
             dropDuck()
             set(DialState.Failed(DialError.CALL_FAILED, entry.displayName))
             return
         }
-        // Don't unduck here: ACTION_DIAL/CALL takes ~1s before telephony has audio, and media
-        // would slam back to full volume. Release when the call interrupts us, or after a timeout.
+        val probe = callProbe
+        if (probe == null) {
+            scheduleDuckHold()
+            return
+        }
+        scheduleCallVerify(entry, attempt, probe)
+    }
+
+    private fun scheduleCallVerify(entry: ContactEntry, attempt: Int, probe: CallStateProbe) {
+        callVerifyTask?.cancel()
+        callVerifyTask = scheduler.post(config.callPlacement.firstCheckMs) {
+            callVerifyTask = null
+            verifyCall(entry, attempt, probe)
+        }
+    }
+
+    private fun verifyCall(entry: ContactEntry, attempt: Int, probe: CallStateProbe) {
+        if (state !is DialState.Calling) return
+        val active = probe.isCallActive()
+        if (active) placementEverActive = true
+        when (CallPlacementLogic.decide(attempt, active, placementEverActive, config.callPlacement)) {
+            CallPlacementDecision.CONFIRMED -> {
+                FlowLog.d("flow", "[$matchSource] call confirmed in telephony")
+                scheduleDuckHold()
+            }
+            CallPlacementDecision.RETRY -> {
+                placementAttempt = attempt + 1
+                FlowLog.d("flow", "[$matchSource] call not active — retrying")
+                launchCallAttempt(entry)
+            }
+            CallPlacementDecision.GIVE_UP -> {
+                FlowLog.d("flow", "[$matchSource] call never became active after ${attempt + 1} attempts")
+                dropDuck()
+                set(DialState.Failed(DialError.CALL_FAILED, entry.displayName))
+            }
+        }
+    }
+
+    private fun scheduleDuckHold() {
         duckHold?.cancel()
         duckHold = scheduler.post(config.duckHoldAfterDialMs) {
             duckHold = null
@@ -847,6 +904,8 @@ class DialController(
 
     private fun stopAll() {
         stopSpeech()
+        countdownTask?.cancel(); countdownTask = null
+        callVerifyTask?.cancel(); callVerifyTask = null
         deadline?.cancel(); deadline = null
     }
 

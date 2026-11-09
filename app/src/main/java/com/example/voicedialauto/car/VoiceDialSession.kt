@@ -11,6 +11,7 @@ import com.example.voicedialauto.VoiceDialApp
 import com.example.voicedialauto.contacts.ContactsCache
 import com.example.voicedialauto.flow.BackgroundWorker
 import com.example.voicedialauto.flow.CachedContactsSource
+import com.example.voicedialauto.flow.CallStateProbe
 import com.example.voicedialauto.flow.Caller
 import com.example.voicedialauto.flow.DialConfig
 import com.example.voicedialauto.flow.DialController
@@ -47,10 +48,17 @@ class VoiceDialSession : Session() {
             source = "car",
         )
         val tts = TtsSpeaker(carContext)
+        lateinit var callProbe: CallStateProbe
+        val interruptionsHolder = arrayOfNulls<InterruptionMonitor>(1)
+        interruptionsHolder[0] = InterruptionMonitor(carContext) {
+            if (::controller.isInitialized) controller.onInterrupted()
+        }
+        callProbe = CallStateProbe { interruptionsHolder[0]!!.isInCallNow() }
         controller = DialController(
             speech = recognizer,
             contacts = CachedContactsSource(appCtx),
             caller = Caller { CallLauncher.call(carContext, it.number, prefs.useActionCall) },
+            callProbe = callProbe,
             scheduler = MainThreadScheduler(),
             permissions = { Permissions.missing(carContext) },
             languages = prefs,
@@ -62,7 +70,7 @@ class VoiceDialSession : Session() {
             continueWhenHidden = { prefs.continueWhenHidden },
         )
         controller.matchSource = "car"
-        val interruptions = InterruptionMonitor(carContext) { controller.onInterrupted() }
+        val interruptions = interruptionsHolder[0]!!
         // TTS already stopped itself on focus loss; if a call is ringing/active, abort everything.
         tts.onFocusLoss = { if (interruptions.isInCallNow()) controller.onInterrupted() }
         lifecycle.addObserver(object : DefaultLifecycleObserver {

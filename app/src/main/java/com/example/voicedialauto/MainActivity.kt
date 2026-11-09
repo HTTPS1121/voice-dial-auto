@@ -102,6 +102,7 @@ import androidx.core.content.ContextCompat
 import com.example.voicedialauto.contacts.ContactEntry
 import com.example.voicedialauto.flow.BackgroundWorker
 import com.example.voicedialauto.flow.CachedContactsSource
+import com.example.voicedialauto.flow.CallStateProbe
 import com.example.voicedialauto.flow.Caller
 import com.example.voicedialauto.flow.DialConfig
 import com.example.voicedialauto.flow.DialController
@@ -158,10 +159,14 @@ class MainActivity : ComponentActivity() {
             source = "phone",
         )
         tts = TtsSpeaker(this)
+        interruptions = InterruptionMonitor(this) {
+            if (::controller.isInitialized) controller.onInterrupted()
+        }
         controller = DialController(
             speech = recognizer,
             contacts = CachedContactsSource(this),
             caller = Caller { placeCall(it) },
+            callProbe = CallStateProbe { interruptions.isInCallNow() },
             scheduler = MainThreadScheduler(),
             permissions = { Permissions.missing(this) },
             languages = prefs,
@@ -173,7 +178,6 @@ class MainActivity : ComponentActivity() {
             continueWhenHidden = { prefs.continueWhenHidden },
         )
         controller.matchSource = "phone"
-        interruptions = InterruptionMonitor(this) { controller.onInterrupted() }
         tts.onFocusLoss = { if (interruptions.isInCallNow()) controller.onInterrupted() }
 
         controller.onStateChanged = { s ->

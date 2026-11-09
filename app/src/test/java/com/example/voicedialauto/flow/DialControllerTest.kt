@@ -83,6 +83,8 @@ class DialControllerTest {
     private lateinit var called: MutableList<ContactEntry>
     private var missing = listOf<String>()
     private var callResult = true
+    private var probeActive = false
+    private var probeReads = 0
 
     class FakeTimings(
         override var nameWindowMs: Long = DEFAULT_NAME_WINDOW_MS,
@@ -102,6 +104,7 @@ class DialControllerTest {
         worker: Worker = Worker.Inline,
         config: DialConfig = DialConfig(afterCallQuietMs = 60_000, listLimit = 6, hideDebounceMs = 0),
         continueWhenHidden: () -> Boolean = { false },
+        withCallProbe: Boolean = false,
     ) = DialController(
         timings = timings,
         speech = speech,
@@ -112,6 +115,10 @@ class DialControllerTest {
             override fun withContacts(block: (List<ContactEntry>) -> Unit) = block(list)
         },
         caller = Caller { called += it; callResult },
+        callProbe = if (withCallProbe) CallStateProbe {
+            probeReads++
+            probeActive
+        } else null,
         scheduler = clock,
         permissions = { missing },
         languages = FakeLang(),
@@ -130,7 +137,11 @@ class DialControllerTest {
         },
     )
 
-    @Before fun setUp() { refreshes = 0; freshChecks = 0; timings = FakeTimings(); speech = FakeSpeech(); clock = FakeScheduler(); called = mutableListOf(); missing = emptyList(); callResult = true }
+    @Before fun setUp() {
+        refreshes = 0; freshChecks = 0; timings = FakeTimings(); speech = FakeSpeech(); clock = FakeScheduler()
+        called = mutableListOf(); missing = emptyList(); callResult = true
+        probeActive = false; probeReads = 0
+    }
 
     @Test fun openStartsListeningImmediately() {
         val c = controller(); c.onVisible()
@@ -325,10 +336,12 @@ class DialControllerTest {
         clock.advance(3_000); c.onVisible(); assertTrue(speech.listening)
     }
 
-    @Test fun hidingDuringCountdownCancelsCall() {
+    @Test fun hidingDuringCountdownStillDialsWhenTimerEnds() {
         val c = controller(); c.onVisible(); speech.say("call Moshe")
-        c.onHidden(); clock.advance(5000)
-        assertTrue(called.isEmpty()); assertTrue(c.state is DialState.Idle)
+        c.onHidden()
+        assertTrue(c.state is DialState.Confirm)
+        clock.advance(5_000)
+        assertEquals("Moshe Peretz", called.single().displayName)
     }
 
     @Test fun returnFromSettingsDoesNotAutoListen() {
@@ -422,6 +435,31 @@ class DialControllerTest {
         callResult = false
         val c = controller(); c.onVisible(); speech.say("call Moshe"); c.callNow()
         assertEquals(DialState.Failed(DialError.CALL_FAILED, "Moshe Peretz"), c.state)
+    }
+
+    @Test fun callRetriesWhenProbeNeverSeesActive() {
+        timings.countdownMs = 0
+        val c = controller(withCallProbe = true, config = DialConfig(afterCallQuietMs = 60_000, listLimit = 6, hideDebounceMs = 0,
+            callPlacement = CallPlacementConfig(maxAttempts = 3, firstCheckMs = 500)))
+        c.onVisible(); speech.say("call Moshe")
+        assertEquals(1, called.size)
+        clock.advance(500)
+        assertEquals(2, called.size)
+        clock.advance(500)
+        assertEquals(3, called.size)
+        clock.advance(500)
+        assertTrue(c.state is DialState.Failed)
+    }
+
+    @Test fun callDoesNotRetryAfterProbeConfirms() {
+        timings.countdownMs = 0
+        probeActive = true
+        val c = controller(withCallProbe = true, config = DialConfig(afterCallQuietMs = 60_000, listLimit = 6, hideDebounceMs = 0,
+            callPlacement = CallPlacementConfig(maxAttempts = 3, firstCheckMs = 500)))
+        c.onVisible(); speech.say("call Moshe")
+        clock.advance(2_000)
+        assertEquals(1, called.size)
+        assertTrue(c.state is DialState.Calling)
     }
 
     // ---------------------------------------------------------------- v4: loop regression tests

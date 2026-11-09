@@ -39,9 +39,12 @@ class Endpointer(
     private var noiseFloor = 0f
     private var samples = 0
     private var loudSince: Long? = null
+    private var lastRms = 0f
     /** Last sample above the floor (any length — a short rise still means "not quiet"). */
     var lastLoudAt = Long.MIN_VALUE / 2
         private set
+    /** Pre-speech ambient level (EMA while not loud); used for fast return-to-baseline endpointing. */
+    val ambientBaseline: Float get() = noiseFloor
 
     /** Returns true if the (meaningful) partial changed. Blank/punctuation-only partials are ignored. */
     fun onPartial(text: String, now: Long): Boolean {
@@ -54,6 +57,7 @@ class Endpointer(
     }
 
     fun onRms(db: Float, now: Long) {
+        lastRms = db
         val loud = samples > 0 && db >= noiseFloor + rmsDelta
         if (!loud) {
             samples++
@@ -74,8 +78,28 @@ class Endpointer(
     /** ms since the transcript last changed (0 before any speech). */
     fun stableFor(now: Long): Long = if (!speechConfirmed) 0L else now - partialChangedAt
 
+    /**
+     * After real speech, end as soon as the level falls back near the pre-speech baseline (short
+     * hangover) — so a one-word utterance closes in ~1 s instead of waiting for [silenceMs].
+     */
+    fun shouldEndOnBaselineReturn(now: Long, hangoverMs: Long = BASELINE_RETURN_HANGOVER_MS): Boolean {
+        if (!speechConfirmed || !loudSeen) return false
+        if (now < partialChangedAt) return false
+        if (partialWordCount() != 1) return false
+        val stable = now - partialChangedAt
+        if (stable < BASELINE_MIN_PARTIAL_MS || stable > EARLY_PARTIAL_MAX_MS) return false
+        val sinceLoud = now - lastLoudAt
+        if (sinceLoud < hangoverMs) return false
+        return lastRms <= noiseFloor + BASELINE_RETURN_MARGIN
+    }
+
+    private fun partialWordCount(): Int =
+        lastPartial?.trim()?.split(Regex("\\s+"))?.count { w -> w.any { it.isLetterOrDigit() } } ?: 0
+
     fun shouldEnd(now: Long): Boolean {
         if (!speechConfirmed) return false
+        if (now < partialChangedAt) return false
+        if (shouldEndOnBaselineReturn(now)) return true
         val stableFor = now - partialChangedAt
         if (stableFor >= maxStableMs) return true
         val quiet = !loudSeen || now - lastLoudAt >= quietMs
@@ -90,5 +114,10 @@ class Endpointer(
         fun isMeaningful(text: String?): Boolean = text != null && text.any { it.isLetterOrDigit() }
         /** Delay between deciding to end and calling stopListening (cancellable). */
         const val CONFIRM_MS = 250L
+        const val BASELINE_RETURN_HANGOVER_MS = 350L
+        const val BASELINE_RETURN_MARGIN = 1.0f
+        const val BASELINE_MIN_PARTIAL_MS = 150L
+        /** Longer partial stability uses the normal (longer) silence rules — avoids cutting multi-word pauses. */
+        const val EARLY_PARTIAL_MAX_MS = 800L
     }
 }

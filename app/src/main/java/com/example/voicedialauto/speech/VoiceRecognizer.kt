@@ -246,6 +246,9 @@ class VoiceRecognizer(
         var segmentsSeen = false
         fun transcript(): String = (segments + listOfNotNull(segPartial)).joinToString(" ").trim()
         var rmsMin = Float.MAX_VALUE; var rmsMax = -Float.MAX_VALUE; var rmsLoggedAt = startedAt
+        var readyAt = 0L
+        var watchdogRestarts = 0
+        val wdCfg = RecognitionWatchdogConfig()
 
         fun log(end: String) = RecognizerSessionLog.add(
             RecognizerSessionLog.Entry(
@@ -322,6 +325,46 @@ class VoiceRecognizer(
             main.postDelayed(confirmCheck, Endpointer.CONFIRM_MS)
         }
 
+        fun restartForWatchdog(reason: String, allowReuse: Boolean) {
+            if (mySession != sessionId || !active) return
+            if (watchdogRestarts >= wdCfg.maxRestartsPerListen) {
+                ev("watchdog: $reason but restart cap reached")
+                return
+            }
+            watchdogRestarts++
+            ev("watchdog: $reason → restart $watchdogRestarts/${wdCfg.maxRestartsPerListen}")
+            log("watchdog:$reason")
+            finish(keepWarm = false)
+            main.post {
+                startInternal(
+                    lang, carMic, listener, allowFallback, options,
+                    allowReuse = allowReuse && watchdogRestarts == 1,
+                    transientAttempt = 0,
+                )
+            }
+        }
+
+        val readyWatchdog = Runnable {
+            when (RecognitionWatchdogLogic.readyTimeout(readySeen, watchdogRestarts, wdCfg)) {
+                RecognitionWatchdogAction.RESTART_READY ->
+                    restartForWatchdog("no onReadyForSpeech", reuse)
+                else -> Unit
+            }
+        }
+        val stallWatchdog = Runnable {
+            val now = SystemClock.elapsedRealtime()
+            val heard = ep.speechConfirmed || segmentsSeen
+            when (
+                RecognitionWatchdogLogic.stallTimeout(
+                    readySeen, heard, if (readyAt > 0) now - readyAt else 0L, watchdogRestarts, wdCfg,
+                )
+            ) {
+                RecognitionWatchdogAction.RESTART_STALL ->
+                    restartForWatchdog("no transcript after ready", false)
+                else -> Unit
+            }
+        }
+
         val stabilityCheck = object : Runnable {
             override fun run() {
                 if (mySession != sessionId || !active || ending) return
@@ -367,11 +410,16 @@ class VoiceRecognizer(
             override fun onReadyForSpeech(params: Bundle?) {
                 if (mySession != sessionId) return
                 readySeen = true
+                readyAt = SystemClock.elapsedRealtime()
+                main.removeCallbacks(readyWatchdog)
+                main.postDelayed(stallWatchdog, wdCfg.stallAfterReadyMs)
                 if (usingPump) audioPolicy.onReady()
                 ev("onReadyForSpeech"); listener.onListening()
             }
             // Noise triggers this too — not proof of speech.
-            override fun onBeginningOfSpeech() { if (mySession == sessionId) ev("onBeginningOfSpeech") }
+            override fun onBeginningOfSpeech() {
+                if (mySession == sessionId) ev("onBeginningOfSpeech")
+            }
             override fun onBufferReceived(buffer: ByteArray?) {}
             // v12: do NOT stop the car-mic pump here — the engine's end-of-speech can fire at the
             // pause after the first word, and closing the audio then truncated the utterance.
@@ -394,6 +442,7 @@ class VoiceRecognizer(
             override fun onPartialResults(partialResults: Bundle?) {
                 if (mySession != sessionId || ending) return
                 val raw = extractHypotheses(partialResults).firstOrNull() ?: return
+                main.removeCallbacks(stallWatchdog)
                 ev("onPartialResults \"$raw\"")
                 val text = if (segmented) { segPartial = raw; transcript() } else raw
                 if (ep.onPartial(text, SystemClock.elapsedRealtime())) {
@@ -512,6 +561,7 @@ class VoiceRecognizer(
             }
         })
         sr.startListening(intent)
+        main.postDelayed(readyWatchdog, wdCfg.readyTimeoutMs)
 
         val watchdog = if (options.continuous) sessionMs + WATCHDOG_SLACK_MS else WATCHDOG_MS
         main.postDelayed({

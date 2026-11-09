@@ -110,6 +110,19 @@ class EndpointerTest {
         assertTrue(ep.shouldEnd(p + 2_000))                 // maxStableMs = 2 × silence
     }
 
+    @Test fun oneWordEndsSoonAfterBaselineReturn() {
+        val ep = Endpointer(10_000, maxStableMs = 20_000)
+        var t = 0L
+        repeat(30) { ep.onRms(2f, t); t += 50 }          // baseline ~2 dB
+        repeat(10) { ep.onRms(9f, t); t += 50 }           // speech spike
+        val wordAt = t
+        ep.onPartial("שלום", wordAt)
+        repeat(10) { ep.onRms(2.2f, t); t += 50 }           // back near baseline
+        assertFalse(ep.shouldEnd(wordAt + 100))
+        assertTrue(ep.shouldEndOnBaselineReturn(wordAt + Endpointer.BASELINE_RETURN_HANGOVER_MS + 50))
+        assertTrue(ep.shouldEnd(wordAt + Endpointer.BASELINE_RETURN_HANGOVER_MS + 50))
+    }
+
     @Test fun loudNoiseWithoutPartialNeverEnds() {
         val ep = Endpointer(800)
         var t = 0L
