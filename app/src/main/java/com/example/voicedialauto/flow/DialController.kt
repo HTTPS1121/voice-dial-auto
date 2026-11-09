@@ -169,11 +169,10 @@ class DialController(
         visible = false
         hideCommitted = true
         if (state is DialState.Calling) {
-            stopSpeech()
+            stopSpeechOnly()
             return
         }
-        stopAll()
-        dropDuck()
+        abortSession()
         stoppedOnHide = true
         set(DialState.Idle(lastCalledName))
     }
@@ -194,14 +193,14 @@ class DialController(
         when (val s = state) {
             is DialState.Calling -> {
                 // Host tears the car session down when the phone call starts. Keep the call + duck.
-                stopSpeech()
+                stopSpeechOnly()
             }
             is DialState.Confirm -> {
                 // Countdown must survive hide — do not bump [token] (would cancel the countdown ticks).
                 emit()
             }
             else -> if (continueWhenHidden()) {
-                stopSpeech()
+                stopSpeechOnly()
                 when (s) {
                     is DialState.Choosing -> set(s.copy(mic = MicState.OFF, partial = null))
                     else -> emit()
@@ -223,11 +222,19 @@ class DialController(
     fun onInterrupted() {
         FlowLog.d("flow", "[$matchSource] interrupted (phone call / audio) in ${describe(state)}")
         holdAutoListen = true
-        stopAll()
-        dropDuck()
-        when (state) {
-            is DialState.Calling, is DialState.NeedsPermissions, is DialState.Idle -> emit()
-            else -> set(DialState.Idle(lastCalledName))
+        when (val s = state) {
+            is DialState.Calling -> {
+                // Our own outgoing handoff sets IN_CALL before telephony confirms — keep verify/retry.
+                stopSpeechOnly()
+                emit()
+                return
+            }
+            is DialState.NeedsPermissions, is DialState.Idle -> {
+                abortSession(); dropDuck(); emit(); return
+            }
+            else -> {
+                abortSession(); dropDuck(); set(DialState.Idle(lastCalledName))
+            }
         }
     }
 
@@ -267,7 +274,10 @@ class DialController(
         if (state is DialState.Listening) listenName(languages.primaryLanguage) else emit()
     }
 
-    fun cancel() { FlowLog.d("flow", "cancel (state=${describe(state)})"); userAction(); stopAll(); dropDuck(); set(DialState.Idle()) }
+    fun cancel() {
+        FlowLog.d("flow", "cancel (state=${describe(state)})")
+        userAction(); abortSession(); dropDuck(); set(DialState.Idle())
+    }
 
     /** Big mic button / header mic action. */
     fun micPressed() {
@@ -290,7 +300,7 @@ class DialController(
     /** "Call now" during the countdown. */
     fun callNow() {
         val s = state as? DialState.Confirm ?: return
-        userAction(); stopAll(); call(s.entry)
+        userAction(); abortSession(); call(s.entry)
     }
 
     /** Back from the car list screen → new name lookup. */
@@ -742,7 +752,8 @@ class DialController(
     /**
      * v12: every call goes through here (single match, spoken number, tapped row). Our own timer
      * places the call when the countdown ends (the car UI doesn't rely on Action.FLAG_DEFAULT);
-     * the actions are "חייג עכשיו" and "בטל התקשרות"; hiding the app cancels it (onHidden).
+     * the actions are "חייג עכשיו" and "בטל התקשרות".
+     * System-driven hide during dial handoff must not cancel the countdown or in-flight placement.
      */
     private fun startCountdown(
         entry: ContactEntry,
@@ -750,7 +761,7 @@ class DialController(
         prompt: String? = null,
         delayMs: Long = countdownMs(),
     ) {
-        stopAll()
+        abortSession()
         speech.pinDuck()
         val total = delayMs
         if (total <= 0) { call(entry); return }
@@ -893,20 +904,25 @@ class DialController(
         return scheduler.now() - t < config.afterCallQuietMs
     }
 
-    /** Mic/TTS only — leave the listen-window timer so a background session can still expire. */
-    private fun stopSpeech() {
+    /** Stops mic/TTS and listen timers; does not cancel outbound placement verify/retry. */
+    private fun stopAll() {
+        stopSpeechOnly()
+        countdownTask?.cancel(); countdownTask = null
+        deadline?.cancel(); deadline = null
+    }
+
+    /** User cancel / new session — also cancels pending dial verification. */
+    private fun abortSession() {
+        stopAll()
+        callVerifyTask?.cancel(); callVerifyTask = null
+    }
+
+    private fun stopSpeechOnly() {
         token++
         pending?.cancel(); pending = null
         heardInSession = false
         speaker?.stop()
         speech.cancel()
-    }
-
-    private fun stopAll() {
-        stopSpeech()
-        countdownTask?.cancel(); countdownTask = null
-        callVerifyTask?.cancel(); callVerifyTask = null
-        deadline?.cancel(); deadline = null
     }
 
     private var lastLogged: String? = null

@@ -5,7 +5,7 @@ import org.junit.Test
 
 class CallPlacementTest {
 
-  private val cfg = CallPlacementConfig(maxAttempts = 3)
+  private val cfg = CallPlacementConfig(maxAttempts = 2)
 
   @Test fun activeConfirmsWithoutRetry() {
     assertEquals(CallPlacementDecision.CONFIRMED, CallPlacementLogic.decide(0, true, false, cfg))
@@ -17,7 +17,6 @@ class CallPlacementTest {
 
   @Test fun inactiveRetriesUntilCap() {
     assertEquals(CallPlacementDecision.RETRY, CallPlacementLogic.decide(0, false, false, cfg))
-    assertEquals(CallPlacementDecision.RETRY, CallPlacementLogic.decide(1, false, false, cfg))
-    assertEquals(CallPlacementDecision.GIVE_UP, CallPlacementLogic.decide(2, false, false, cfg))
+    assertEquals(CallPlacementDecision.GIVE_UP, CallPlacementLogic.decide(1, false, false, cfg))
   }
 }

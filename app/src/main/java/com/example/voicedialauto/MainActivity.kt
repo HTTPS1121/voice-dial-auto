@@ -116,6 +116,7 @@ import com.example.voicedialauto.speech.InterruptionMonitor
 import com.example.voicedialauto.speech.TtsSpeaker
 import com.example.voicedialauto.speech.VoiceRecognizer
 import com.example.voicedialauto.ui.VoiceDialTheme
+import com.example.voicedialauto.telecom.OutboundDialer
 import com.example.voicedialauto.util.FileLog
 import com.example.voicedialauto.util.Permissions
 import com.example.voicedialauto.util.Prefs
@@ -273,18 +274,8 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    private fun placeCall(entry: ContactEntry): Boolean {
-        val uri = Uri.fromParts("tel", entry.number, null)
-        val canCall = ContextCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) ==
-            PackageManager.PERMISSION_GRANTED
-        return try {
-            startActivity(Intent(if (canCall) Intent.ACTION_CALL else Intent.ACTION_DIAL, uri))
-            true
-        } catch (e: Exception) {
-            Log.w(TAG, "ACTION_CALL failed, falling back to ACTION_DIAL", e)
-            runCatching { startActivity(Intent(Intent.ACTION_DIAL, uri)) }.isSuccess
-        }
-    }
+    private fun placeCall(entry: ContactEntry): Boolean =
+        OutboundDialer.place(this, entry.number, preferDirect = true)
 
     private companion object { const val TAG = "MainActivity" }
 }

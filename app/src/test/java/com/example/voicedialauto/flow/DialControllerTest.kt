@@ -440,22 +440,45 @@ class DialControllerTest {
     @Test fun callRetriesWhenProbeNeverSeesActive() {
         timings.countdownMs = 0
         val c = controller(withCallProbe = true, config = DialConfig(afterCallQuietMs = 60_000, listLimit = 6, hideDebounceMs = 0,
-            callPlacement = CallPlacementConfig(maxAttempts = 3, firstCheckMs = 500)))
+            callPlacement = CallPlacementConfig(maxAttempts = 2, firstCheckMs = 500)))
         c.onVisible(); speech.say("call Moshe")
         assertEquals(1, called.size)
         clock.advance(500)
         assertEquals(2, called.size)
         clock.advance(500)
-        assertEquals(3, called.size)
-        clock.advance(500)
         assertTrue(c.state is DialState.Failed)
+    }
+
+    /** App-to-app handoff: onStop/audio interrupt during our outbound call must not kill verify/retry. */
+    @Test fun dialHandoffInterruptStillRetriesOnce() {
+        timings.countdownMs = 0
+        val c = controller(withCallProbe = true, config = DialConfig(afterCallQuietMs = 60_000, listLimit = 6, hideDebounceMs = 0,
+            callPlacement = CallPlacementConfig(maxAttempts = 2, firstCheckMs = 400)))
+        c.onVisible(); speech.say("call Moshe")
+        assertEquals(1, called.size)
+        c.onHidden()
+        c.onInterrupted()
+        clock.advance(400)
+        assertEquals(2, called.size)
+        clock.advance(400)
+        assertTrue(c.state is DialState.Failed)
+        assertEquals(2, called.size)
+    }
+
+    @Test fun userCancelDuringCountdownPreventsDial() {
+        timings.countdownMs = 3_000
+        val c = controller(withCallProbe = true); c.onVisible(); speech.say("call Moshe")
+        c.onHidden()
+        c.cancel()
+        clock.advance(5_000)
+        assertTrue(called.isEmpty())
     }
 
     @Test fun callDoesNotRetryAfterProbeConfirms() {
         timings.countdownMs = 0
         probeActive = true
         val c = controller(withCallProbe = true, config = DialConfig(afterCallQuietMs = 60_000, listLimit = 6, hideDebounceMs = 0,
-            callPlacement = CallPlacementConfig(maxAttempts = 3, firstCheckMs = 500)))
+            callPlacement = CallPlacementConfig(maxAttempts = 2, firstCheckMs = 500)))
         c.onVisible(); speech.say("call Moshe")
         clock.advance(2_000)
         assertEquals(1, called.size)
@@ -984,6 +1007,8 @@ class DialControllerTest {
         c.callNow()
         assertTrue(speech.duckPinned)
         c.onInterrupted()
+        assertTrue("duck held through outbound handoff interrupt", speech.duckPinned)
+        clock.advance(3_000)
         assertTrue(!speech.duckPinned)
     }
 

@@ -10,7 +10,8 @@ fun interface CallStateProbe {
  * retrying. Pure scheduling decisions — unit-tested on the JVM.
  */
 data class CallPlacementConfig(
-    val maxAttempts: Int = 3,
+    /** Initial launch + at most one safe retry when telephony never shows active. */
+    val maxAttempts: Int = 2,
     val firstCheckMs: Long = 650,
     val betweenChecksMs: Long = 400,
 )
