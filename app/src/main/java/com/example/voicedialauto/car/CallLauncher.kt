@@ -5,6 +5,7 @@ import android.net.Uri
 import android.util.Log
 import androidx.car.app.CarContext
 import androidx.car.app.HostException
+import com.example.voicedialauto.telecom.OutboundDialer
 
 /**
  * Places a call through Android Auto's own phone UI.
@@ -18,6 +19,9 @@ object CallLauncher {
     private const val TAG = "CallLauncher"
 
     fun call(carContext: CarContext, number: String, preferActionCall: Boolean): Boolean {
+        if (preferActionCall && OutboundDialer.place(carContext.applicationContext, number, preferDirect = true)) {
+            return true
+        }
         val uri = Uri.fromParts("tel", number, null)
         if (preferActionCall) {
             try {

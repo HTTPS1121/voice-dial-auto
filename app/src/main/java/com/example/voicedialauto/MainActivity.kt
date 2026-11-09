@@ -102,6 +102,7 @@ import androidx.core.content.ContextCompat
 import com.example.voicedialauto.contacts.ContactEntry
 import com.example.voicedialauto.flow.BackgroundWorker
 import com.example.voicedialauto.flow.CachedContactsSource
+import com.example.voicedialauto.flow.CallStateProbe
 import com.example.voicedialauto.flow.Caller
 import com.example.voicedialauto.flow.DialConfig
 import com.example.voicedialauto.flow.DialController
@@ -115,6 +116,7 @@ import com.example.voicedialauto.speech.InterruptionMonitor
 import com.example.voicedialauto.speech.TtsSpeaker
 import com.example.voicedialauto.speech.VoiceRecognizer
 import com.example.voicedialauto.ui.VoiceDialTheme
+import com.example.voicedialauto.telecom.OutboundDialer
 import com.example.voicedialauto.util.FileLog
 import com.example.voicedialauto.util.Permissions
 import com.example.voicedialauto.util.Prefs
@@ -158,10 +160,14 @@ class MainActivity : ComponentActivity() {
             source = "phone",
         )
         tts = TtsSpeaker(this)
+        interruptions = InterruptionMonitor(this) {
+            if (::controller.isInitialized) controller.onInterrupted()
+        }
         controller = DialController(
             speech = recognizer,
             contacts = CachedContactsSource(this),
             caller = Caller { placeCall(it) },
+            callProbe = CallStateProbe { interruptions.isInCallNow() },
             scheduler = MainThreadScheduler(),
             permissions = { Permissions.missing(this) },
             languages = prefs,
@@ -173,7 +179,6 @@ class MainActivity : ComponentActivity() {
             continueWhenHidden = { prefs.continueWhenHidden },
         )
         controller.matchSource = "phone"
-        interruptions = InterruptionMonitor(this) { controller.onInterrupted() }
         tts.onFocusLoss = { if (interruptions.isInCallNow()) controller.onInterrupted() }
 
         controller.onStateChanged = { s ->
@@ -269,18 +274,8 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    private fun placeCall(entry: ContactEntry): Boolean {
-        val uri = Uri.fromParts("tel", entry.number, null)
-        val canCall = ContextCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) ==
-            PackageManager.PERMISSION_GRANTED
-        return try {
-            startActivity(Intent(if (canCall) Intent.ACTION_CALL else Intent.ACTION_DIAL, uri))
-            true
-        } catch (e: Exception) {
-            Log.w(TAG, "ACTION_CALL failed, falling back to ACTION_DIAL", e)
-            runCatching { startActivity(Intent(Intent.ACTION_DIAL, uri)) }.isSuccess
-        }
-    }
+    private fun placeCall(entry: ContactEntry): Boolean =
+        OutboundDialer.place(this, entry.number, preferDirect = true)
 
     private companion object { const val TAG = "MainActivity" }
 }

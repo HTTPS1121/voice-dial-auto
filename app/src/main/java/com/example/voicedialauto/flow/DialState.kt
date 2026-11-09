@@ -94,6 +94,8 @@ data class DialConfig(
     val hideDebounceMs: Long = 400,
     /** Keep media ducked after dialing until the phone call grabs audio (or this timeout). */
     val duckHoldAfterDialMs: Long = 3_000,
+    /** Outbound call: probe telephony after launch; retry if the call never appears (bounded). */
+    val callPlacement: CallPlacementConfig = CallPlacementConfig(),
     val suggestionThreshold: Double = 0.35,
     val maxSuggestions: Int = 3,
     /** Match threshold (ContactMatcher). Lowered in v7 for first-name / cross-script. */

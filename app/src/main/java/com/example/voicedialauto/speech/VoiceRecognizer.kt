@@ -13,6 +13,8 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.util.Log
 import androidx.car.app.CarContext
+import com.example.voicedialauto.contacts.ContactsCache
+import com.example.voicedialauto.contacts.NameCompletenessGate
 import com.example.voicedialauto.flow.FlowTimeline
 import com.example.voicedialauto.flow.ListenOptions
 import com.example.voicedialauto.flow.RecognitionError
@@ -246,6 +248,9 @@ class VoiceRecognizer(
         var segmentsSeen = false
         fun transcript(): String = (segments + listOfNotNull(segPartial)).joinToString(" ").trim()
         var rmsMin = Float.MAX_VALUE; var rmsMax = -Float.MAX_VALUE; var rmsLoggedAt = startedAt
+        var readyAt = 0L
+        var watchdogRestarts = 0
+        val wdCfg = RecognitionWatchdogConfig()
 
         fun log(end: String) = RecognizerSessionLog.add(
             RecognizerSessionLog.Entry(
@@ -308,10 +313,18 @@ class VoiceRecognizer(
         // v11: an end decision is confirmed CONFIRM_MS later; louder input / a new partial cancels it.
         var endDecidedAt = 0L
         var endReason = ""
+        fun endSignals(at: Long, vadProb: Float = 0f) = Endpointer.EndSignals(
+            vadInSpeech = vadOn && vad.inSpeech,
+            vadProb = if (vadOn) vadProb else 0f,
+            vadEndThreshold = vad.endThreshold,
+            blockAmbiguousFirstName = NameCompletenessGate.shouldBlockBaselineEnd(
+                ep.lastPartial, ContactsCache.ambiguousFirstNames,
+            ),
+        )
         val confirmCheck = Runnable {
             if (mySession != sessionId || !active || ending || endDecidedAt == 0L) return@Runnable
             val now = SystemClock.elapsedRealtime()
-            if (ep.confirmEnd(endDecidedAt, now)) forceEnd(endReason)
+            if (ep.confirmEnd(endDecidedAt, now, endSignals(now))) forceEnd(endReason)
             else { ev("end cancelled: speech resumed"); endDecidedAt = 0L }
         }
         fun considerEnd(reason: String) {
@@ -322,14 +335,57 @@ class VoiceRecognizer(
             main.postDelayed(confirmCheck, Endpointer.CONFIRM_MS)
         }
 
+        fun restartForWatchdog(reason: String, allowReuse: Boolean) {
+            if (mySession != sessionId || !active) return
+            if (watchdogRestarts >= wdCfg.maxRestartsPerListen) {
+                ev("watchdog: $reason but restart cap reached")
+                return
+            }
+            watchdogRestarts++
+            ev("watchdog: $reason → restart $watchdogRestarts/${wdCfg.maxRestartsPerListen}")
+            log("watchdog:$reason")
+            finish(keepWarm = false)
+            main.post {
+                startInternal(
+                    lang, carMic, listener, allowFallback, options,
+                    allowReuse = allowReuse && watchdogRestarts == 1,
+                    transientAttempt = 0,
+                )
+            }
+        }
+
+        val readyWatchdog = Runnable {
+            when (RecognitionWatchdogLogic.readyTimeout(readySeen, watchdogRestarts, wdCfg)) {
+                RecognitionWatchdogAction.RESTART_READY ->
+                    restartForWatchdog("no onReadyForSpeech", reuse)
+                else -> Unit
+            }
+        }
+        val stallWatchdog = Runnable {
+            val now = SystemClock.elapsedRealtime()
+            val heard = ep.speechConfirmed || segmentsSeen
+            when (
+                RecognitionWatchdogLogic.stallTimeout(
+                    readySeen, heard, if (readyAt > 0) now - readyAt else 0L, watchdogRestarts, wdCfg,
+                )
+            ) {
+                RecognitionWatchdogAction.RESTART_STALL ->
+                    restartForWatchdog("no transcript after ready", false)
+                else -> Unit
+            }
+        }
+
         val stabilityCheck = object : Runnable {
             override fun run() {
                 if (mySession != sessionId || !active || ending) return
                 val now = SystemClock.elapsedRealtime()
                 if (vadOn) {
+                    val sig = endSignals(now)
                     if (ep.stableFor(now) >= VadEndpointer.STABLE_FALLBACK_MS) forceEnd("stable ${VadEndpointer.STABLE_FALLBACK_MS}ms (vad net)")
-                    else if (vad.shouldEnd(now, ep.speechConfirmed, ep.changedAt)) forceEnd("vad silence ${vad.silenceFor(now)}ms")
-                } else if (ep.shouldEnd(now)) considerEnd("stable ${silenceMs}ms+quiet")
+                    else if (ep.shouldEndOnBaselineReturn(now, sig)) considerEnd("baseline-return")
+                    else if (vad.shouldEnd(now, ep.speechConfirmed, ep.changedAt) && !sig.blockAmbiguousFirstName)
+                        forceEnd("vad silence ${vad.silenceFor(now)}ms")
+                } else if (ep.shouldEnd(now, endSignals(now))) considerEnd("stable ${silenceMs}ms+quiet")
                 if (!ending && ep.speechConfirmed) main.postDelayed(this, STABILITY_TICK_MS)
             }
         }
@@ -342,11 +398,16 @@ class VoiceRecognizer(
         onFrame = frame@{ prob, db, at ->
             if (mySession != sessionId || !active) return@frame
             listener.onLevel(db)
-            if (!vadOn) { ep.onRms(db, at); if (!ending && ep.shouldEnd(at)) considerEnd("stable+rms-quiet"); return@frame }
             // v15: our own TTS prompt (and its speaker tail) is not the driver's speech.
             val gated = TtsActivity.gated(at)
             if (gated != ttsGated) { ttsGated = gated; ev(if (gated) "vad gated: TTS playing" else "vad ungated: TTS done") }
             val p = if (gated) 0f else prob
+            ep.onRms(db, at)
+            val sig = endSignals(at, p)
+            if (!vadOn) {
+                if (!ending && ep.shouldEnd(at, sig)) considerEnd("stable+rms-quiet")
+                return@frame
+            }
             pMax = maxOf(pMax, prob)
             if (vad.onFrame(p, VadEngine.FRAME_MS, at)) {
                 ev(if (vad.inSpeech) "vad speech (p=${"%.2f".format(prob)} total=${vad.speechMs}ms)"
@@ -357,7 +418,9 @@ class VoiceRecognizer(
                 catchUpLogged = true
                 ev("end held: VAD speech at ${rel(vad.segmentStartAt)} after last transcript ${rel(ep.changedAt)} → wait ≤${vad.catchUpMs}ms")
             }
-            if (!ending && vad.shouldEnd(at, ep.speechConfirmed, ep.changedAt)) {
+            if (!ending && ep.shouldEndOnBaselineReturn(at, sig)) {
+                considerEnd("baseline-return+vad")
+            } else if (!ending && vad.shouldEnd(at, ep.speechConfirmed, ep.changedAt) && !sig.blockAmbiguousFirstName) {
                 ev("end decided: vad silence ${vad.silenceFor(at)}ms ≥ ${vad.hangoverMs}ms t_lastSpeech=${rel(vad.lastSpeechAt)} t_endDecided=${rel(at)}")
                 forceEnd("vad")
             }
@@ -367,11 +430,16 @@ class VoiceRecognizer(
             override fun onReadyForSpeech(params: Bundle?) {
                 if (mySession != sessionId) return
                 readySeen = true
+                readyAt = SystemClock.elapsedRealtime()
+                main.removeCallbacks(readyWatchdog)
+                main.postDelayed(stallWatchdog, wdCfg.stallAfterReadyMs)
                 if (usingPump) audioPolicy.onReady()
                 ev("onReadyForSpeech"); listener.onListening()
             }
             // Noise triggers this too — not proof of speech.
-            override fun onBeginningOfSpeech() { if (mySession == sessionId) ev("onBeginningOfSpeech") }
+            override fun onBeginningOfSpeech() {
+                if (mySession == sessionId) ev("onBeginningOfSpeech")
+            }
             override fun onBufferReceived(buffer: ByteArray?) {}
             // v12: do NOT stop the car-mic pump here — the engine's end-of-speech can fire at the
             // pause after the first word, and closing the audio then truncated the utterance.
@@ -388,12 +456,13 @@ class VoiceRecognizer(
                     ev("rms ${"%.1f".format(rmsMin)}..${"%.1f".format(rmsMax)} loud=${ep.loudSeen}")
                     rmsLoggedAt = now; rmsMin = Float.MAX_VALUE; rmsMax = -Float.MAX_VALUE
                 }
-                if (!ending && ep.shouldEnd(now)) considerEnd("stable+rms-quiet")
+                if (!ending && ep.shouldEnd(now, endSignals(now))) considerEnd("stable+rms-quiet")
             }
 
             override fun onPartialResults(partialResults: Bundle?) {
                 if (mySession != sessionId || ending) return
                 val raw = extractHypotheses(partialResults).firstOrNull() ?: return
+                main.removeCallbacks(stallWatchdog)
                 ev("onPartialResults \"$raw\"")
                 val text = if (segmented) { segPartial = raw; transcript() } else raw
                 if (ep.onPartial(text, SystemClock.elapsedRealtime())) {
@@ -512,6 +581,7 @@ class VoiceRecognizer(
             }
         })
         sr.startListening(intent)
+        main.postDelayed(readyWatchdog, wdCfg.readyTimeoutMs)
 
         val watchdog = if (options.continuous) sessionMs + WATCHDOG_SLACK_MS else WATCHDOG_MS
         main.postDelayed({
