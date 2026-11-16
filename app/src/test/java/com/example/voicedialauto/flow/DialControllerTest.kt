@@ -315,19 +315,75 @@ class DialControllerTest {
         val sp = FakeSpeaker()
         val c = controller(sp, continueWhenHidden = { true }); c.onVisible(); c.onHidden()
         assertTrue(c.state is DialState.Listening)
+        assertTrue(speech.listening)
         clock.advance(10_000)
         assertEquals(DialState.NoMatch("", emptyList()), c.state)
         assertEquals("nomatch", sp.spoken.last())
     }
 
-    @Test fun resumeWhileListeningListensAgainWhenContinueEnabled() {
-        val c = controller(continueWhenHidden = { true }); c.onVisible(); c.onHidden(); assertTrue(!speech.listening)
-        clock.advance(3_000); c.onVisible(); assertTrue(speech.listening)
+    @Test fun hideDuringListeningRecognizesSpeechAndPlacesCallWhenContinueEnabled() {
+        val sp = FakeSpeaker()
+        val c = controller(
+            sp,
+            config = DialConfig(afterCallQuietMs = 60_000, listLimit = 6, hideDebounceMs = 400),
+            continueWhenHidden = { true },
+        )
+        c.onVisible()
+        c.onHidden()
+        clock.advance(500) // past debounce: hidden in background, mic still open!
+        assertTrue(speech.listening)
+        assertTrue(speech.duckPinned)
+        speech.say("call Moshe")
+        assertTrue(c.state is DialState.Confirm)
+        assertTrue(sp.speaking)
+        assertEquals("single Moshe Peretz", sp.spoken.last())
+        clock.advance(5_000)
+        assertEquals(1, called.size)
+        assertEquals("Moshe Peretz", called.single().displayName)
+    }
+
+    @Test fun hideDuringConfirmKeepsPromptSpeakingAndPlacesCallWhenContinueEnabled() {
+        val sp = FakeSpeaker()
+        val c = controller(
+            sp,
+            config = DialConfig(afterCallQuietMs = 60_000, listLimit = 6, hideDebounceMs = 400),
+            continueWhenHidden = { true },
+        )
+        c.onVisible()
+        speech.say("call Moshe")
+        assertTrue(c.state is DialState.Confirm)
+        assertTrue(sp.speaking)
+        c.onHidden()
+        clock.advance(500) // past debounce: TTS must NOT be cut off!
+        assertTrue(sp.speaking)
+        assertTrue(speech.duckPinned)
+        assertTrue(c.state is DialState.Confirm)
+        clock.advance(5_000)
+        assertEquals(1, called.size)
+    }
+
+    @Test fun resumeWhileListeningKeepsSameMicSessionWhenContinueEnabled() {
+        val c = controller(continueWhenHidden = { true }); c.onVisible(); c.onHidden()
+        assertTrue(speech.listening)
+        assertEquals(1, speech.starts)
+        clock.advance(3_000); c.onVisible()
+        assertTrue(speech.listening)
+        assertEquals(1, speech.starts)
     }
 
     @Test fun hidingDuringCountdownCancelsCall() {
         val c = controller(); c.onVisible(); speech.say("call Moshe")
         c.onHidden(); clock.advance(5000)
+        assertTrue(called.isEmpty()); assertTrue(c.state is DialState.Idle)
+    }
+
+    @Test fun hidingDuringCountdownWithCarDebounceCancelsBeforeTick() {
+        val c = controller(config = DialConfig(afterCallQuietMs = 60_000, listLimit = 6, hideDebounceMs = 400))
+        c.onVisible(); speech.say("call Moshe")
+        c.onHidden()
+        clock.advance(50)
+        assertTrue(called.isEmpty())
+        clock.advance(5000)
         assertTrue(called.isEmpty()); assertTrue(c.state is DialState.Idle)
     }
 
@@ -410,12 +466,34 @@ class DialControllerTest {
         assertTrue(called.isEmpty()); assertTrue(c.state is DialState.Idle)
     }
 
-    @Test fun ownOutgoingCallKeepsCallingState() {
-        timings.countdownMs = 0
-        val c = controller(); c.onVisible(); speech.say("call Moshe")
+    @Test fun ownOutgoingCallKeepsCallingStateThenUpdatesAfterDisconnect() {
+        val c = controller(); c.onVisible(); speech.say("call Moshe"); c.callNow()
         assertTrue(c.state is DialState.Calling)
         c.onInterrupted()
         assertTrue(c.state is DialState.Calling); assertEquals(1, called.size)
+        // When the call disconnects, the screen updates out of Calling immediately.
+        c.onCallEnded()
+        assertEquals(DialState.Idle("Moshe Peretz"), c.state)
+    }
+
+    @Test fun returningAfterCallDisconnectNeverStaysStuckOnCalling() {
+        val c = controller(); c.onVisible(); speech.say("call Moshe"); c.callNow()
+        c.onInterrupted() // call went active (holdAutoListen = true, state = Calling)
+        c.onHidden()
+        clock.advance(3_000)
+        c.onVisible()     // user returns after hanging up
+        assertEquals(DialState.Idle("Moshe Peretz"), c.state)
+    }
+
+    @Test fun reopeningCarAppAfterHideStartsListeningImmediately() {
+        val c = controller(config = DialConfig(afterCallQuietMs = 5_000, listLimit = 6, hideDebounceMs = 400))
+        c.matchSource = "car"
+        c.onVisible()
+        c.onHidden(); clock.advance(5_000) // user switched to Waze -> Idle + stoppedOnHide
+        assertTrue(c.state is DialState.Idle)
+        c.onVisible()                      // user tapped app icon in AA dock -> must listen immediately!
+        assertTrue(c.state is DialState.Listening)
+        assertTrue(speech.listening)
     }
 
     @Test fun failedCallShowsError() {
@@ -545,14 +623,50 @@ class DialControllerTest {
         assertTrue(!speech.listening); assertEquals(1, speech.starts)
     }
 
-    @Test fun deadlineDoesNotCutOffSpeechInProgress() {
+    @Test fun stablePartialCommitsBeforeTheListenWindow() {
+        timings.nameWindowMs = 10_000
+        val c = controller(); c.onVisible()
+        speech.partial("תתקשר ליוסי")
+        clock.advance(DialConfig().nameHoldMs - 1)
+        assertTrue("still listening before the hold, got ${c.state}", c.state is DialState.Listening)
+        clock.advance(1)
+        assertTrue("got ${c.state}", c.state is DialState.Confirm)
+        assertEquals("יוסי מזרחי", (c.state as DialState.Confirm).entry.displayName)
+        assertTrue(!speech.listening)
+    }
+
+    @Test fun anotherWordResetsTheHold() {
+        val c = controller(); c.onVisible()
+        speech.partial("תתקשר")
+        clock.advance(DialConfig().nameHoldMs - 100)
+        assertTrue(c.state is DialState.Listening)
+        speech.partial("תתקשר ליוסי")
+        clock.advance(DialConfig().nameHoldMs - 1)
+        assertTrue("second word must reset the hold, got ${c.state}", c.state is DialState.Listening)
+        clock.advance(1)
+        assertEquals("יוסי מזרחי", (c.state as DialState.Confirm).entry.displayName)
+    }
+
+    @Test fun spellingFlickerDoesNotResetTheHold() {
+        val c = controller(list = hanni); c.onVisible()
+        speech.partial("חני")
+        clock.advance(400)
+        speech.partial("חני.")
+        clock.advance(200)
+        speech.partial("חני ")
+        clock.advance(DialConfig().nameHoldMs - 400)
+        assertTrue("flicker must not push the list out to the window, got ${c.state}", c.state is DialState.Choosing)
+        assertTrue(clock.now() < 2_000)
+    }
+
+    @Test fun windowEndCommitsAPartialThatHasNotFinishedItsHold() {
         timings.nameWindowMs = 5_000
         val c = controller(); c.onVisible()
-        clock.advance(4_000); speech.listener!!.onPartial("תתקשר ל")
-        clock.advance(2_000)                                   // past the deadline
-        assertTrue(c.state is DialState.Listening); assertTrue(speech.listening)
-        speech.say("תתקשר ליוסי")
-        assertTrue(c.state is DialState.Confirm)
+        clock.advance(4_800)
+        speech.partial("תתקשר ליוסי")
+        clock.advance(200)
+        assertTrue("got ${c.state}", c.state is DialState.Confirm)
+        assertEquals("יוסי מזרחי", (c.state as DialState.Confirm).entry.displayName)
     }
 
     @Test fun longWindowStillStopsErrorStorm() {
@@ -589,9 +703,12 @@ class DialControllerTest {
         assertEquals(5, (c.state as DialState.Choosing).outOfRange)
     }
 
-    @Test fun zeroCountdownCallsImmediately() {
+    @Test fun singleMatchNeverCallsImmediatelyFromListeningEvenIfCountdownZero() {
         timings.countdownMs = 0
         val c = controller(); c.onVisible(); speech.say("תתקשר ליוסי")
+        assertTrue("must show Confirm countdown first, got ${c.state}", c.state is DialState.Confirm)
+        assertTrue(called.isEmpty())
+        clock.advance(1_000)
         assertTrue(c.state is DialState.Calling)
         assertEquals("יוסי מזרחי", called.single().displayName)
     }
@@ -726,12 +843,14 @@ class DialControllerTest {
         assertTrue(s.items.none { it.displayName == "משה פרץ" })
     }
 
-    /** With both words captured (final or merged partial) the full name is called, not listed. */
+    /** With both words captured (final or merged partial) the full name is matched, not listed. */
     @Test fun twoWordUtteranceCallsTheFullName() {
         val list = listOf(ContactEntry(1, "חני כהן", "0501"), ContactEntry(2, "חני לוי", "0502"))
-        timings.countdownMs = 0
+        timings.countdownMs = 1_000
         val c = controller(list = list); c.onVisible()
         speech.say("חני כהן")
+        assertTrue(c.state is DialState.Confirm)
+        clock.advance(1_000)
         assertEquals("חני כהן", called.single().displayName)
     }
 
@@ -847,63 +966,54 @@ class DialControllerTest {
         assertEquals(items[1], called.single())
     }
 
-    // ---------------------------------------------------------------- v12: continuation after an engine cut
+    // ---------------------------------------------------------------- immediate match on speech end (Waze/Gemini style)
 
     private val hanni = listOf(ContactEntry(1, "חני כהן", "0501"), ContactEntry(2, "חני לוי", "0502"), ContactEntry(3, "משה פרץ", "0503"))
 
-    /** The bug: the engine ends the session after "חני"; "כהן" follows → must call חני כהן. */
-    @Test fun engineCutAfterFirstWordIsContinued() {
-        timings.countdownMs = 0
+    @Test fun singleWordMultipleMatchesShowsListImmediatelyWithoutWaiting() {
         val c = controller(list = hanni); c.onVisible()
         speech.engineSay("חני")
-        assertTrue("still listening: ${c.state}", c.state is DialState.Listening)
-        assertEquals("חני", (c.state as DialState.Listening).partial)
-        assertTrue(speech.listening); assertTrue(called.isEmpty())
-        speech.partial("כהן")
-        assertEquals("חני כהן", (c.state as DialState.Listening).partial)
-        speech.say("כהן")
-        assertEquals("חני כהן", called.single().displayName)
-    }
-
-    @Test fun engineCutWithNoMoreSpeechMatchesAfterContinuationWindow() {
-        val c = controller(list = hanni); c.onVisible()
-        speech.engineSay("חני")
-        clock.advance(1_200); assertTrue(c.state is DialState.Listening)
-        clock.advance(200)
+        // Must jump straight to Choosing at t=0 without waiting for any continuation/window timer!
+        assertTrue("expected Choosing immediately, got ${c.state}", c.state is DialState.Choosing)
         val s = c.state as DialState.Choosing
         assertEquals(setOf("חני כהן", "חני לוי"), s.items.map { it.displayName }.toSet())
     }
 
     @Test fun ourOwnEndOfSpeechMatchesImmediately() {
         val c = controller(list = hanni); c.onVisible()
-        speech.say("חני")                     // byApp = true: the driver really stopped
+        speech.say("חני")
         assertTrue(c.state is DialState.Choosing)
     }
 
-    @Test fun continuationsAreCapped() {
-        timings.countdownMs = 0
+    @Test fun shortNamePartialShowsTheListWithoutWaitingForTheWindow() {
+        timings.nameWindowMs = 10_000
         val c = controller(list = hanni); c.onVisible()
-        speech.engineSay("תתקשר")
-        speech.engineSay("ל")
-        speech.engineSay("משה")                // 3rd engine cut → match now (max 2 continuations)
+        speech.partial("חני")
+        clock.advance(DialConfig().nameHoldMs)
+        assertTrue("list must show on the hold, not at the window. got ${c.state}", c.state is DialState.Choosing)
+        val s = c.state as DialState.Choosing
+        assertEquals(setOf("חני כהן", "חני לוי"), s.items.map { it.displayName }.toSet())
+        assertTrue(clock.now() < 10_000)
+    }
+
+    @Test fun secondWordWithinTheHoldMatchesTheFullName() {
+        val c = controller(list = hanni); c.onVisible()
+        speech.partial("חני")
+        clock.advance(400)
+        speech.partial("חני כהן")
+        clock.advance(DialConfig().nameHoldMs)
+        assertTrue("got ${c.state}", c.state is DialState.Confirm)
+        assertEquals("חני כהן", (c.state as DialState.Confirm).entry.displayName)
+    }
+
+    @Test fun singleWordSingleMatchEntersConfirmImmediatelyWithoutWaiting() {
+        val c = controller(list = hanni); c.onVisible()
+        speech.engineSay("משה")
+        assertTrue("expected Confirm immediately, got ${c.state}", c.state is DialState.Confirm)
+        assertEquals("משה פרץ", (c.state as DialState.Confirm).entry.displayName)
+        assertTrue(called.isEmpty())
+        clock.advance(5_000)
         assertEquals("משה פרץ", called.single().displayName)
-    }
-
-    @Test fun continuationIsNotCutByNameWindow() {
-        timings.nameWindowMs = 5_000; timings.countdownMs = 0
-        val c = controller(list = hanni); c.onVisible()
-        clock.advance(4_900); speech.engineSay("חני")
-        clock.advance(300)                     // past the name window
-        assertTrue(c.state is DialState.Listening)
-        speech.partial("כהן"); speech.say("כהן")
-        assertEquals("חני כהן", called.single().displayName)
-    }
-
-    @Test fun noSpeechInContinuationMatchesFirstPart() {
-        val c = controller(list = hanni); c.onVisible()
-        speech.engineSay("חני")
-        speech.silence()
-        assertTrue(c.state is DialState.Choosing)
     }
 
     // ---------------------------------------------------------------- v15: echo stripping
@@ -986,10 +1096,13 @@ class DialControllerTest {
         assertEquals(rows[1], called.single())
     }
 
-    @Test fun twoWordEngineResultSkipsContinuation() {
-        timings.countdownMs = 0
+    @Test fun twoWordEngineResultEntersConfirmThenCalls() {
+        timings.countdownMs = 1_000
         val c = controller(list = hanni); c.onVisible()
         speech.engineSay("חני כהן")
+        assertTrue(c.state is DialState.Confirm)
+        assertTrue(called.isEmpty())
+        clock.advance(1_000)
         assertEquals("חני כהן", called.single().displayName)
     }
 }

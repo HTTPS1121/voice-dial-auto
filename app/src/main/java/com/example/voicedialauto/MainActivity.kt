@@ -150,30 +150,35 @@ class MainActivity : ComponentActivity() {
         prefs = Prefs(this)
         runCatching { VoiceDialApp.instance.cancelLeftoverPrompt() }
         FileLog.log("lifecycle", "phone MainActivity onCreate", "phone")
+        val appCtx = applicationContext
         recognizer = VoiceRecognizer(
-            this, null,
+            appCtx, null,
             endOfSpeechSilenceMs = { prefs.endOfSpeechSilenceMs },
             segmentedEnabled = { prefs.segmentedRecognition },
             vadSettings = { prefs.vadSettings },
             source = "phone",
         )
-        tts = TtsSpeaker(this)
+        tts = TtsSpeaker(appCtx)
         controller = DialController(
             speech = recognizer,
-            contacts = CachedContactsSource(this),
-            caller = Caller { placeCall(it) },
+            contacts = CachedContactsSource(appCtx),
+            caller = Caller { com.example.voicedialauto.car.CallLauncher.placeSystemCall(appCtx, it.number) },
             scheduler = MainThreadScheduler(),
-            permissions = { Permissions.missing(this) },
+            permissions = { Permissions.missing(appCtx) },
             languages = prefs,
             config = DialConfig(afterCallQuietMs = 60_000, listLimit = 8),
             timings = prefs,
             worker = BackgroundWorker,
             speaker = tts,
-            prompts = ResPrompts(this),
+            prompts = ResPrompts(appCtx),
             continueWhenHidden = { prefs.continueWhenHidden },
         )
         controller.matchSource = "phone"
-        interruptions = InterruptionMonitor(this) { controller.onInterrupted() }
+        interruptions = InterruptionMonitor(
+            context = appCtx,
+            onCallEnded = { controller.onCallEnded() },
+            onInterrupt = { controller.onInterrupted() },
+        )
         tts.onFocusLoss = { if (interruptions.isInCallNow()) controller.onInterrupted() }
 
         controller.onStateChanged = { s ->
@@ -236,6 +241,9 @@ class MainActivity : ComponentActivity() {
         themeTick++
         FileLog.log("lifecycle", "phone onStart", "phone")
         interruptions.start()
+        if (controller.state is DialState.Calling && !interruptions.isInCallNow()) {
+            controller.onCallEnded()
+        }
         VoiceRecognizer.resetAudioPolicy()
         controller.onVisible()
     }
@@ -246,41 +254,37 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
-        FileLog.log("lifecycle", "phone onStop -> cancel countdown / mic / TTS", "phone")
+        FileLog.log("lifecycle", "phone onStop -> hide", "phone")
         controller.onHidden()
-        interruptions.stop()
+        if (!prefs.continueWhenHidden || !controller.hasActiveBackgroundWork()) {
+            interruptions.stop()
+        }
         super.onStop()
     }
 
     override fun onDestroy() {
-        val calling = controller.state is DialState.Calling
-        val keptTts = runCatching {
-            VoiceDialApp.instance.takeLeftoverPrompt(
-                controller,
-                prefs.continueWhenHidden,
-                tts,
-                ResPrompts(this).noMatch(),
-                prefs.primaryLanguage,
+        controller.flushPendingHide()
+        val adopted = runCatching {
+            VoiceDialApp.instance.adoptBackgroundSession(
+                controller = controller,
+                continueWhenHidden = prefs.continueWhenHidden,
+                recognizer = recognizer,
+                tts = tts,
+                interruptions = interruptions,
             )
         }.getOrDefault(false)
-        controller.onDestroyed()
-        recognizer.destroy(keepDuck = calling)
-        if (!keptTts) tts.shutdown()
+        if (!adopted) {
+            interruptions.stop()
+            val calling = controller.state is DialState.Calling
+            controller.onDestroyed()
+            recognizer.destroy(keepDuck = calling)
+            tts.shutdown()
+        }
         super.onDestroy()
     }
 
-    private fun placeCall(entry: ContactEntry): Boolean {
-        val uri = Uri.fromParts("tel", entry.number, null)
-        val canCall = ContextCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) ==
-            PackageManager.PERMISSION_GRANTED
-        return try {
-            startActivity(Intent(if (canCall) Intent.ACTION_CALL else Intent.ACTION_DIAL, uri))
-            true
-        } catch (e: Exception) {
-            Log.w(TAG, "ACTION_CALL failed, falling back to ACTION_DIAL", e)
-            runCatching { startActivity(Intent(Intent.ACTION_DIAL, uri)) }.isSuccess
-        }
-    }
+    private fun placeCall(entry: ContactEntry): Boolean =
+        com.example.voicedialauto.car.CallLauncher.placeSystemCall(this, entry.number)
 
     private companion object { const val TAG = "MainActivity" }
 }

@@ -18,7 +18,7 @@ import java.util.Locale
  * utterance finishes, fails, is stopped, TTS isn't available, or after a safety timeout.
  * Car: same duck as Waze (NAVIGATION_GUIDANCE + MAY_DUCK). Phone: USAGE_ASSISTANT.
  */
-class TtsSpeaker(context: Context) : Speaker {
+class TtsSpeaker(context: Context, carAudio: Boolean = context is CarContext) : Speaker {
     private val app = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
     private val audio = app.getSystemService(AudioManager::class.java)
@@ -26,29 +26,35 @@ class TtsSpeaker(context: Context) : Speaker {
     private var failed = false
     private var pending: (() -> Unit)? = null
     private var pendingDone: (() -> Unit)? = null
+    private var idleWaiters = mutableListOf<() -> Unit>()
     private var focus: AudioFocusRequest? = null
     private var seq = 0
 
+    val isSpeaking: Boolean get() = currentId != null || pending != null
+
     /**
-     * v9: invoked on the main thread when another app takes audio focus while we speak
-     * (canDuck = AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK). The utterance is already stopped by then.
+     * v9: invoked on the main thread when another app takes exclusive audio focus while we speak.
+     * Transient ducking (e.g. AA UI chime or Waze prompt when switching screens) must NOT cut off
+     * our confirmation utterance mid-sentence.
      */
     var onFocusLoss: ((canDuck: Boolean) -> Unit)? = null
 
     private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
         when (change) {
             AudioManager.AUDIOFOCUS_LOSS,
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> main.post {
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> main.post {
                 com.example.voicedialauto.util.FileLog.log("audio", "TTS focus loss $change")
                 // Never keep talking over a ringtone / call / other assistant: stop right away.
                 stop()
-                onFocusLoss?.invoke(change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK)
+                onFocusLoss?.invoke(false)
+            }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                com.example.voicedialauto.util.FileLog.log("audio", "TTS focus ducked (continuing)")
             }
         }
     }
 
-    private val attrs = if (context is CarContext) NavDuck.attrs()
+    private val attrs = if (carAudio) NavDuck.attrs()
         else AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_ASSISTANT)
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
@@ -110,6 +116,15 @@ class TtsSpeaker(context: Context) : Speaker {
         pendingDone = null
         abandonFocus()
         done()
+        if (!isSpeaking && idleWaiters.isNotEmpty()) {
+            val w = idleWaiters.toList()
+            idleWaiters.clear()
+            w.forEach { it() }
+        }
+    }
+
+    fun whenIdle(block: () -> Unit) {
+        if (!isSpeaking) block() else idleWaiters += block
     }
 
     override fun stop() {

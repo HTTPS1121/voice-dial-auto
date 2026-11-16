@@ -81,11 +81,17 @@ class DialController(
     private var hideTask: Cancellable? = null
     /** Set when a real hide stopped the session; next onVisible stays Idle until a user action. */
     private var stoppedOnHide = false
+    /** Set when a real hide kept the session running in the background (continueWhenHidden = true). */
+    private var runningWhileHidden = false
     private var duckHold: Cancellable? = null
     /** True after [commitHide] actually released the mic. False if hide was only scheduled. */
     private var hideCommitted = false
     /** Last non-blank partial of the current listening session (car endpointing fallback). */
     private var lastPartial: String? = null
+    /** Words we already armed [nameCommit] for. Grows only when the user is still talking. */
+    private var heldWords: List<String> = emptyList()
+    /** Fires [nameHoldMs] after the utterance stopped growing. Independent of Google's onResults. */
+    private var nameCommit: Cancellable? = null
 
     /** Number of times the recognizer was started (diagnostics / tests). */
     var recognizerStarts = 0
@@ -108,12 +114,13 @@ class DialController(
         val now = scheduler.now()
         val away = hiddenAt?.let { now - it } ?: Long.MAX_VALUE
         hiddenAt = null
+        val longAway = away >= config.minAwayForAutoListenMs
 
         if (suppressNextVisible) {
             suppressNextVisible = false
             when (state) {
                 // The mic was released in onHidden(); show the idle mic instead of a stale "listening".
-                is DialState.Listening, is DialState.Processing -> { set(DialState.Idle(lastCalledName)); return }
+                is DialState.Listening, is DialState.Processing, is DialState.Calling -> { set(DialState.Idle(lastCalledName)); return }
                 is DialState.NeedsPermissions -> Unit
                 else -> { emit(); return }
             }
@@ -122,38 +129,86 @@ class DialController(
         if (missing.isNotEmpty()) { set(DialState.NeedsPermissions(missing)); return }
 
         if (stoppedOnHide) {
-            emit()
-            return
+            if (matchSource == "car" && longAway && !recentlyCalled()) {
+                // Re-opening the app from the AA dock/launcher only triggers onStart -> onVisible:
+                // start listening immediately instead of staying stuck on Idle.
+                stoppedOnHide = false
+                holdAutoListen = false
+            } else {
+                if (state is DialState.Calling) set(DialState.Idle(lastCalledName)) else emit()
+                return
+            }
+        }
+
+        if (runningWhileHidden) {
+            runningWhileHidden = false
+            when (val cur = state) {
+                // Background session is still actively listening / matching / counting down:
+                // resume UI seamlessly without killing the open mic or resetting the countdown.
+                is DialState.Listening, is DialState.Processing, is DialState.Confirm -> {
+                    emit()
+                    return
+                }
+                is DialState.Choosing -> if (cur.mic == MicState.LISTENING) {
+                    emit()
+                    return
+                }
+                else -> Unit
+            }
         }
 
         val s = state
         val lang = languages.primaryLanguage
-        val longAway = away >= config.minAwayForAutoListenMs
         if (holdAutoListen && opened) {
-            // After a phone call interrupted us: show the idle mic, never auto-resume.
-            if (s is DialState.Listening || s is DialState.Processing || s is DialState.Confirm) set(DialState.Idle(lastCalledName))
-            else if (s is DialState.Choosing) set(s.copy(mic = MicState.OFF, partial = null))
-            else emit()
-            return
+            if (matchSource == "car" && longAway && !recentlyCalled() && s !is DialState.Calling) {
+                holdAutoListen = false
+            } else {
+                // After a phone call ended or interrupted us: clear Calling / Listening to Idle.
+                if (s is DialState.Listening || s is DialState.Processing || s is DialState.Confirm || s is DialState.Calling) {
+                    set(DialState.Idle(lastCalledName))
+                } else if (s is DialState.Choosing) {
+                    set(s.copy(mic = MicState.OFF, partial = null))
+                } else {
+                    emit()
+                }
+                return
+            }
         }
         when {
             !opened -> { opened = true; userAction(); listenName(lang) }
             s is DialState.NeedsPermissions -> listenName(lang)
             // Host paused us; UI still says listening — open the mic again, never dump to Idle.
             s is DialState.Listening || s is DialState.Processing -> listenName(lang, auto = true)
-            s is DialState.Calling || s is DialState.Idle ->
+            s is DialState.Calling ->
+                if (recentlyCalled() || !longAway) set(DialState.Idle(lastCalledName))
+                else listenName(lang, auto = true)
+            s is DialState.Idle ->
                 if (recentlyCalled()) set(DialState.Idle(lastCalledName))
                 else if (longAway) listenName(lang, auto = true)
                 else emit()
             s is DialState.Choosing ->
                 if (longAway && autoGuard.tryAcquire(now)) listenChoice(s.items) else set(s.copy(mic = MicState.OFF))
             s is DialState.NoMatch || s is DialState.Failed -> emit()
+            s is DialState.Confirm -> emit()
             else -> if (longAway) listenName(lang, auto = true) else set(DialState.Idle(lastCalledName))
         }
     }
 
     /** Milliseconds left in the current listen window (0 if none). */
     fun remainingWindowMs(): Long = (windowEnd - scheduler.now()).coerceAtLeast(0L)
+
+    /** True while an active listen / match / countdown should keep running in the background. */
+    fun hasActiveBackgroundWork(): Boolean = when (val s = state) {
+        is DialState.Listening, is DialState.Processing, is DialState.Confirm -> true
+        is DialState.Choosing -> s.mic == MicState.LISTENING
+        else -> false
+    }
+
+    /** If [onHidden] debounce is pending, apply it now (e.g. session [onDestroy] before debounce elapses). */
+    fun flushPendingHide() {
+        hideTask?.cancel(); hideTask = null
+        if (!visible && !hideCommitted) commitHide()
+    }
 
     /**
      * Session/activity is gone. Always stop listen/TTS unless an outgoing call is in flight —
@@ -163,6 +218,7 @@ class DialController(
         hideTask?.cancel(); hideTask = null
         visible = false
         hideCommitted = true
+        runningWhileHidden = false
         if (state is DialState.Calling) {
             stopSpeech()
             return
@@ -173,12 +229,18 @@ class DialController(
         set(DialState.Idle(lastCalledName))
     }
 
-    /** App/screen hidden: release mic and TTS, cancel a pending countdown. Idempotent. */
+    /** App/screen hidden: release mic and TTS, cancel a pending countdown (unless continueWhenHidden). Idempotent. */
     fun onHidden() {
         if (!visible) return
         visible = false
         hiddenAt = scheduler.now()
         hideTask?.cancel()
+        // Confirm + «המשך אחרי יציאה» off: cancel immediately so a tick inside the 400ms AA flap
+        // window cannot place the call after the user already left.
+        if (!continueWhenHidden() && state is DialState.Confirm) {
+            commitHide()
+            return
+        }
         val delay = config.hideDebounceMs
         if (delay <= 0) commitHide()
         else hideTask = scheduler.post(delay) { hideTask = null; commitHide() }
@@ -189,16 +251,41 @@ class DialController(
         when (val s = state) {
             is DialState.Calling -> {
                 // Host tears the car session down when the phone call starts. Keep the call + duck.
+                runningWhileHidden = false
                 stopSpeech()
             }
             else -> if (continueWhenHidden()) {
-                stopSpeech()
                 when (s) {
-                    is DialState.Confirm -> { dropDuck(); set(DialState.Idle()) }
-                    is DialState.Choosing -> set(s.copy(mic = MicState.OFF, partial = null))
-                    else -> emit()
+                    // Keep confirmation TTS ("נמצא שם אחד...") playing, keep duck, keep countdown ticking!
+                    is DialState.Confirm -> {
+                        runningWhileHidden = true
+                        emit()
+                    }
+                    // Keep the microphone actively listening and matching in the background!
+                    is DialState.Listening, is DialState.Processing -> {
+                        runningWhileHidden = true
+                        emit()
+                    }
+                    is DialState.Choosing -> {
+                        if (s.mic == MicState.LISTENING) {
+                            runningWhileHidden = true
+                            emit()
+                        } else {
+                            runningWhileHidden = false
+                            stopSpeech()
+                            dropDuck()
+                            set(s.copy(partial = null))
+                        }
+                    }
+                    else -> {
+                        runningWhileHidden = false
+                        stopSpeech()
+                        dropDuck()
+                        emit()
+                    }
                 }
             } else {
+                runningWhileHidden = false
                 stopAll()
                 dropDuck()
                 stoppedOnHide = true
@@ -220,6 +307,16 @@ class DialController(
         when (state) {
             is DialState.Calling, is DialState.NeedsPermissions, is DialState.Idle -> emit()
             else -> set(DialState.Idle(lastCalledName))
+        }
+    }
+
+    /** Phone call disconnected: never leave the UI stuck on the previous Calling screen. */
+    fun onCallEnded() {
+        FlowLog.d("flow", "[$matchSource] call ended in ${describe(state)}")
+        lastCallAt = scheduler.now()
+        dropDuck()
+        if (state is DialState.Calling) {
+            set(DialState.Idle(lastCalledName))
         }
     }
 
@@ -296,7 +393,7 @@ class DialController(
         contacts.refresh { list -> onDone(list.size) }
     }
 
-    private fun userAction() { autoGuard.reset(); holdAutoListen = false; stoppedOnHide = false }
+    private fun userAction() { autoGuard.reset(); holdAutoListen = false; stoppedOnHide = false; runningWhileHidden = false }
 
     // ------------------------------------------------------------------ name lookup
 
@@ -323,6 +420,50 @@ class DialController(
     /** v12: words captured before the engine ended a session; more may follow (continuation). */
     private var pendingFirst: List<String>? = null
     private fun wordCount(t: String) = t.split(Regex("\\s+")).count { w -> w.any { it.isLetterOrDigit() } }
+
+    /** Real words only. A trailing 1-letter flicker ("חני ה", "חני.") is not a new word. */
+    private fun nameWords(text: String): List<String> =
+        text.lowercase()
+            .replace(Regex("[^\\p{L}\\p{Nd}\\s]"), " ")
+            .trim()
+            .split(Regex("\\s+"))
+            .filter { it.length >= 2 }
+
+    /**
+     * True when the driver is still talking: first words, an extra word, or the last word got longer
+     * ("חנ" > "חני"). A rewrite of the same words ("חני" / "חני." / "חנה") does not count —
+     * that flicker is what kept the phone session open until the listen timer.
+     */
+    private fun utteranceGrew(prev: List<String>, next: List<String>): Boolean {
+        if (next.isEmpty()) return false
+        if (prev.isEmpty() || next.size > prev.size) return true
+        if (next.size == prev.size) {
+            val a = prev.last()
+            val b = next.last()
+            if (b.length > a.length && b.startsWith(a)) return true
+        }
+        return false
+    }
+
+    private fun armNameCommit(my: Int) {
+        nameCommit?.cancel()
+        nameCommit = scheduler.post(config.nameHoldMs) {
+            nameCommit = null
+            if (my != token) return@post
+            commitHeardName()
+        }
+    }
+
+    /** Close the mic and match [lastPartial]. Does not wait for Google onResults. */
+    private fun commitHeardName() {
+        nameCommit?.cancel(); nameCommit = null
+        if (state !is DialState.Listening) return
+        val raw = lastPartial?.trim().orEmpty()
+        if (nameWords(raw).isEmpty()) return
+        token++
+        speech.cancel()
+        onNameResults(listOf(raw))
+    }
     private var continuations = 0
 
     /**
@@ -350,8 +491,12 @@ class DialController(
 
     private fun expireWindow(onExpired: () -> Unit) {
         deadline = null
-        // Never cut the user off mid-sentence: let a session that is hearing speech finish.
-        if (heardInSession) return
+        // Speech already heard: match it now. Waiting here is the "list appears only when the
+        // timer ends" bug — the phone's recognizer never closes a short name by itself.
+        if (state is DialState.Listening && nameWords(lastPartial.orEmpty()).isNotEmpty()) {
+            commitHeardName()
+            return
+        }
         onExpired()
     }
 
@@ -377,6 +522,8 @@ class DialController(
      */
     private fun startName(lang: String, continuation: Boolean = false) {
         lastPartial = null
+        heldWords = emptyList()
+        nameCommit?.cancel(); nameCommit = null
         if (!continuation) FlowTimeline.begin(scheduler.now())
         val my = ++token
         val prefix = pendingFirst?.firstOrNull()
@@ -402,6 +549,11 @@ class DialController(
                 if (text.any { it.isLetterOrDigit() }) {
                     heardInSession = true
                     lastPartial = text
+                    val words = nameWords(text)
+                    if (utteranceGrew(heldWords, words)) {
+                        heldWords = words
+                        armNameCommit(my)
+                    }
                 }
                 if (state is DialState.Listening) {
                     val t = if (prefix != null && text.isNotBlank()) "$prefix $text" else (text.ifBlank { prefix ?: "" })
@@ -420,9 +572,6 @@ class DialController(
                 when {
                     hyp.isEmpty() && continuation -> finishContinuation(emptyList())
                     hyp.isEmpty() -> onNameError(RecognitionError.NO_SPEECH, lang, my)
-                    // v15: a 2+ word result ("משה כהן") is complete — no continuation wait.
-                    !byApp && continuations < config.maxContinuations &&
-                        wordCount(hyp.first()) < 2 -> beginContinuation(lang, hyp)
                     else -> { val all = combine(pendingFirst, hyp); pendingFirst = null; onNameResults(all) }
                 }
             }
@@ -513,6 +662,7 @@ class DialController(
 
     private fun onNameResults(hypotheses: List<String>) {
         deadline?.cancel(); deadline = null
+        nameCommit?.cancel(); nameCommit = null
         FlowTimeline.mark("accepted", scheduler.now())
         if (CancelDetector.isCancel(hypotheses)) { cancel(); return }
         val heard = hypotheses.first()
@@ -554,7 +704,8 @@ class DialController(
             is ContactMatcher.Result.Single -> {
                 logAttempt(hypotheses, partialSnapshot, extracted, cacheCount, "SINGLE", listOf(r.match),
                     "call ${r.match.contact.displayName}")
-                startCountdown(r.match.contact, heard, prompts?.singleMatch(r.match.contact.displayName))
+                val delay = countdownMs().coerceAtLeast(config.minSingleMatchCountdownMs)
+                startCountdown(r.match.contact, heard, prompts?.singleMatch(r.match.contact.displayName), delay)
             }
             is ContactMatcher.Result.Multiple -> {
                 logAttempt(hypotheses, partialSnapshot, extracted, cacheCount, "MULTIPLE", r.matches.take(3),
@@ -592,9 +743,20 @@ class DialController(
 
     // ------------------------------------------------------------------ list / choice
 
-    /** Mic opens with the list. No TTS — duck stays from the name session so the driver can speak a number immediately. */
+    /**
+     * Mic opens with the list. When visible, stay silent so the driver can immediately read the
+     * screen and say a number; when hidden (background continue), announce multiple matches aloud.
+     */
     private fun enterChoosing(items: List<ContactEntry>) {
         listenChoice(items)
+        if (!visible) {
+            val p = prompts ?: return
+            val sp = speaker ?: return
+            val text = p.multiple(items.size).takeIf { it.isNotBlank() } ?: return
+            promptText = text
+            promptSpeaking = true
+            sp.speak(text, p.languageTag) { promptSpeaking = false }
+        }
     }
 
     /** Text of the short list prompt currently/last spoken (echo filter). */
@@ -638,7 +800,11 @@ class DialController(
         speech.pinDuck()
         beginWindow(choiceWindowMs()) {
             val s = state as? DialState.Choosing
-            if (s != null && s.mic == MicState.LISTENING) { stopAll(); set(s.copy(mic = MicState.OFF, partial = null)) }
+            if (s != null && s.mic == MicState.LISTENING) {
+                stopAll()
+                dropDuck()
+                set(s.copy(mic = MicState.OFF, partial = null))
+            }
         }
         startChoice(items, notice = null)
     }
@@ -725,6 +891,7 @@ class DialController(
             later(config.choiceRestartDelayMs, my) { startChoice(items, notice) }
         } else {
             stopAll()
+            dropDuck()
             set(DialState.Choosing(items, MicState.OFF, outOfRange = notice))
         }
     }
@@ -840,6 +1007,8 @@ class DialController(
     private fun stopSpeech() {
         token++
         pending?.cancel(); pending = null
+        nameCommit?.cancel(); nameCommit = null
+        heldWords = emptyList()
         heardInSession = false
         speaker?.stop()
         speech.cancel()

@@ -17,22 +17,21 @@ import java.util.concurrent.Executor
 
 /**
  * v9: detects phone-call interruptions and calls [onInterrupt] on the main thread so the dialer
- * can stop TTS + recognition immediately. Signals (any of them, de-duplicated):
- *  - API 31+: AudioManager.addOnModeChangedListener → MODE_RINGTONE / MODE_IN_CALL /
- *    MODE_CALL_SCREENING (no permission needed). MODE_IN_COMMUNICATION (VoIP) is deliberately NOT
- *    used: some voice-input/Bluetooth paths switch to it and it would abort our own listening;
- *    VoIP calls still take audio focus, which stops TTS;
- *  - API 31+: TelephonyCallback.CallStateListener, only if READ_PHONE_STATE was granted (optional);
- *  - API 26–30: PhoneStateListener.LISTEN_CALL_STATE (no permission needed below API 31).
- * [isInCallNow] is also available for one-off checks (e.g. when TTS loses audio focus).
+ * can stop TTS + recognition immediately, and [onCallEnded] when the call disconnects so the UI
+ * clears any stale Calling screen right away.
  */
-class InterruptionMonitor(context: Context, private val onInterrupt: (reason: String) -> Unit) {
+class InterruptionMonitor(
+    context: Context,
+    private val onCallEnded: (() -> Unit)? = null,
+    private val onInterrupt: (reason: String) -> Unit,
+) {
     private val app = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
     private val mainExecutor = Executor { main.post(it) }
     private val audio = app.getSystemService(AudioManager::class.java)
     private val telephony = app.getSystemService(TelephonyManager::class.java)
     private var started = false
+    private var activeCallSeen = false
     private var modeListener: Any? = null
     private var telephonyCallback: Any? = null
     @Suppress("DEPRECATION")
@@ -41,6 +40,7 @@ class InterruptionMonitor(context: Context, private val onInterrupt: (reason: St
     fun start() {
         if (started) return
         started = true
+        activeCallSeen = isInCallNow()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) startApi31() else startLegacy()
     }
 
@@ -57,9 +57,18 @@ class InterruptionMonitor(context: Context, private val onInterrupt: (reason: St
 
     private fun fire(reason: String) {
         if (!started) return
+        activeCallSeen = true
         Log.i(TAG, "interrupt: $reason")
         com.example.voicedialauto.util.FileLog.log("call", "interrupt: $reason")
         main.post { if (started) onInterrupt(reason) }
+    }
+
+    private fun fireCallEnded(reason: String) {
+        if (!started || !activeCallSeen) return
+        activeCallSeen = false
+        Log.i(TAG, "call ended: $reason")
+        com.example.voicedialauto.util.FileLog.log("call", "call ended: $reason")
+        main.post { if (started) onCallEnded?.invoke() }
     }
 
     private fun isCallMode(mode: Int) = mode == AudioManager.MODE_RINGTONE ||
@@ -68,7 +77,10 @@ class InterruptionMonitor(context: Context, private val onInterrupt: (reason: St
 
     @RequiresApi(Build.VERSION_CODES.S)
     private fun startApi31() {
-        val ml = AudioManager.OnModeChangedListener { mode -> if (isCallMode(mode)) fire("audio_mode=$mode") }
+        val ml = AudioManager.OnModeChangedListener { mode ->
+            if (isCallMode(mode)) fire("audio_mode=$mode")
+            else if (mode == AudioManager.MODE_NORMAL) fireCallEnded("audio_mode=NORMAL")
+        }
         runCatching { audio.addOnModeChangedListener(mainExecutor, ml); modeListener = ml }
             .onFailure { Log.w(TAG, "mode listener", it) }
         if (ContextCompat.checkSelfPermission(app, Manifest.permission.READ_PHONE_STATE) ==
@@ -77,6 +89,7 @@ class InterruptionMonitor(context: Context, private val onInterrupt: (reason: St
             val cb = object : TelephonyCallback(), TelephonyCallback.CallStateListener {
                 override fun onCallStateChanged(state: Int) {
                     if (state != TelephonyManager.CALL_STATE_IDLE) fire("call_state=$state")
+                    else fireCallEnded("call_state=IDLE")
                 }
             }
             runCatching { telephony?.registerTelephonyCallback(mainExecutor, cb); telephonyCallback = cb }
@@ -97,6 +110,7 @@ class InterruptionMonitor(context: Context, private val onInterrupt: (reason: St
             @Deprecated("Deprecated in Java")
             override fun onCallStateChanged(state: Int, phoneNumber: String?) {
                 if (state != TelephonyManager.CALL_STATE_IDLE) fire("call_state=$state")
+                else fireCallEnded("call_state=IDLE")
             }
         }
         runCatching { telephony?.listen(l, PhoneStateListener.LISTEN_CALL_STATE); legacyListener = l }
