@@ -76,8 +76,9 @@ class ContactListScreen(carContext: CarContext, private val controller: DialCont
             MicState.SPEAKING -> CarUi.iconAction(carContext, R.drawable.ic_volume) { controller.micPressed() }
             MicState.OFF -> CarUi.iconAction(carContext, R.drawable.ic_mic_off) { controller.micPressed() }
         }
+        val retry = CarUi.iconAction(carContext, R.drawable.ic_refresh) { controller.recognizeAgain() }
         return ListTemplate.Builder()
-            .header(carContext, bidi(carContext, carContext.getString(R.string.car_choose_title)), mic)
+            .header(carContext, bidi(carContext, carContext.getString(R.string.car_choose_title)), mic, retry)
             .setSingleList(list.build())
             .build()
     }

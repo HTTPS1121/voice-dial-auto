@@ -31,22 +31,33 @@ internal object CarUi {
         Action.Builder().setIcon(icon(ctx, res, tint)).setOnClickListener(onClick).build()
 
     @Suppress("DEPRECATION")
-    fun MessageTemplate.Builder.header(ctx: CarContext, title: String, endAction: Action?): MessageTemplate.Builder =
-        if (ctx.carAppApiLevel >= CarAppApiLevels.LEVEL_7) {
-            setHeader(Header.Builder().setTitle(title).apply { endAction?.let { addEndHeaderAction(it) } }.build())
+    fun MessageTemplate.Builder.header(ctx: CarContext, title: String, vararg endActions: Action?): MessageTemplate.Builder {
+        val actions = endActions.filterNotNull()
+        return if (ctx.carAppApiLevel >= CarAppApiLevels.LEVEL_7) {
+            setHeader(Header.Builder().setTitle(title).apply { actions.forEach { addEndHeaderAction(it) } }.build())
         } else {
-            setTitle(title).apply { endAction?.let { setActionStrip(ActionStrip.Builder().addAction(it).build()) } }
+            setTitle(title).apply {
+                if (actions.isNotEmpty()) {
+                    setActionStrip(ActionStrip.Builder().apply { actions.forEach { addAction(it) } }.build())
+                }
+            }
         }
+    }
 
     @Suppress("DEPRECATION")
-    fun ListTemplate.Builder.header(ctx: CarContext, title: String, endAction: Action?): ListTemplate.Builder =
-        if (ctx.carAppApiLevel >= CarAppApiLevels.LEVEL_7) {
+    fun ListTemplate.Builder.header(ctx: CarContext, title: String, vararg endActions: Action?): ListTemplate.Builder {
+        val actions = endActions.filterNotNull()
+        return if (ctx.carAppApiLevel >= CarAppApiLevels.LEVEL_7) {
             setHeader(
                 Header.Builder().setTitle(title).setStartHeaderAction(Action.BACK)
-                    .apply { endAction?.let { addEndHeaderAction(it) } }.build()
+                    .apply { actions.forEach { addEndHeaderAction(it) } }.build(),
             )
         } else {
-            setTitle(title).setHeaderAction(Action.BACK)
-                .apply { endAction?.let { setActionStrip(ActionStrip.Builder().addAction(it).build()) } }
+            setTitle(title).setHeaderAction(Action.BACK).apply {
+                if (actions.isNotEmpty()) {
+                    setActionStrip(ActionStrip.Builder().apply { actions.forEach { addAction(it) } }.build())
+                }
+            }
         }
+    }
 }
