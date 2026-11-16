@@ -48,6 +48,14 @@ class Prefs(context: Context) : LanguageSource, TimingSource {
             e.remove(KEY_END_SILENCE_TENTHS)
             e.putBoolean(KEY_MIGRATED_V13, true)
         }
+        // Single-match calls from voice recognition must ALWAYS show the countdown screen first
+        // (never dial immediately from the listening screen). Move any stored < 1.0s back to 5.0s.
+        if (!sp.getBoolean(KEY_MIGRATED_NO_ZERO_SINGLE, false)) {
+            if (sp.getInt(KEY_COUNTDOWN_HALF_S, COUNTDOWN_DEFAULT_HALF_S) < COUNTDOWN_MIN_HALF_S) {
+                e.putInt(KEY_COUNTDOWN_HALF_S, COUNTDOWN_DEFAULT_HALF_S)
+            }
+            e.putBoolean(KEY_MIGRATED_NO_ZERO_SINGLE, true)
+        }
         e.apply()
     }
 
@@ -72,7 +80,8 @@ class Prefs(context: Context) : LanguageSource, TimingSource {
     override val choiceWindowMs: Long
         get() = sp.getInt(KEY_LIST_WINDOW_S, LIST_WINDOW_DEFAULT_S).coerceIn(LIST_WINDOW_MIN_S, LIST_WINDOW_MAX_S) * 1000L
     override val countdownMs: Long
-        get() = sp.getInt(KEY_COUNTDOWN_HALF_S, COUNTDOWN_DEFAULT_HALF_S).coerceIn(0, COUNTDOWN_MAX_HALF_S) * 500L
+        get() = sp.getInt(KEY_COUNTDOWN_HALF_S, COUNTDOWN_DEFAULT_HALF_S)
+            .coerceIn(COUNTDOWN_MIN_HALF_S, COUNTDOWN_MAX_HALF_S) * 500L
     override val listCountdownMs: Long
         get() = sp.getInt(KEY_LIST_COUNTDOWN_HALF_S, LIST_COUNTDOWN_DEFAULT_HALF_S).coerceIn(0, COUNTDOWN_MAX_HALF_S) * 500L
 
@@ -127,8 +136,9 @@ class Prefs(context: Context) : LanguageSource, TimingSource {
         set(v) = sp.edit().putInt(KEY_LIST_WINDOW_S, v.coerceIn(LIST_WINDOW_MIN_S, LIST_WINDOW_MAX_S)).apply()
 
     var countdownHalfSeconds: Int
-        get() = sp.getInt(KEY_COUNTDOWN_HALF_S, COUNTDOWN_DEFAULT_HALF_S).coerceIn(0, COUNTDOWN_MAX_HALF_S)
-        set(v) = sp.edit().putInt(KEY_COUNTDOWN_HALF_S, v.coerceIn(0, COUNTDOWN_MAX_HALF_S)).apply()
+        get() = sp.getInt(KEY_COUNTDOWN_HALF_S, COUNTDOWN_DEFAULT_HALF_S)
+            .coerceIn(COUNTDOWN_MIN_HALF_S, COUNTDOWN_MAX_HALF_S)
+        set(v) = sp.edit().putInt(KEY_COUNTDOWN_HALF_S, v.coerceIn(COUNTDOWN_MIN_HALF_S, COUNTDOWN_MAX_HALF_S)).apply()
 
     var listCountdownHalfSeconds: Int
         get() = sp.getInt(KEY_LIST_COUNTDOWN_HALF_S, LIST_COUNTDOWN_DEFAULT_HALF_S).coerceIn(0, COUNTDOWN_MAX_HALF_S)
@@ -180,8 +190,10 @@ class Prefs(context: Context) : LanguageSource, TimingSource {
         const val LIST_WINDOW_MIN_S = 10
         const val LIST_WINDOW_MAX_S = 120
         val COUNTDOWN_DEFAULT_HALF_S = (DEFAULT_COUNTDOWN_MS / 500).toInt()    // 10 = 5.0 s (v12)
+        const val COUNTDOWN_MIN_HALF_S = 2                                      // 1.0 s minimum (never 0)
         const val OLD_COUNTDOWN_DEFAULT_HALF_S = 7                              // 3.5 s (v5–v11)
         private const val KEY_MIGRATED_V12 = "migrated_v12_countdown"
+        private const val KEY_MIGRATED_NO_ZERO_SINGLE = "migrated_no_zero_single_countdown"
         const val COUNTDOWN_MAX_HALF_S = 20                                     // 10 s
         const val KEY_SEGMENTED = "segmented_recognition"
         const val KEY_VAD_ENABLED = "vad_enabled"

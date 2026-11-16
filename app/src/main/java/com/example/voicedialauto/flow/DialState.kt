@@ -49,6 +49,8 @@ data class DialConfig(
     val nameWindowMs: Long = DEFAULT_NAME_WINDOW_MS,
     val choiceWindowMs: Long = DEFAULT_CHOICE_WINDOW_MS,
     val countdownMs: Long = DEFAULT_COUNTDOWN_MS,
+    /** Minimum countdown after a single voice match — never dial immediately from Listening. */
+    val minSingleMatchCountdownMs: Long = 1_000L,
     /** After a list pick (row / spoken number). 0 = call immediately. */
     val listCountdownMs: Long = DEFAULT_LIST_COUNTDOWN_MS,
     /**
@@ -82,6 +84,11 @@ data class DialConfig(
      */
     val continuationMs: Long = 1_300,
     val maxContinuations: Int = 2,
+    /**
+     * Name screen: once the heard words stop growing (no new word, last word not getting longer),
+     * match after this — do not wait for Google to close the session. Spelling flicker does not reset it.
+     */
+    val nameHoldMs: Long = 700,
     /** Circuit breaker: max automatic (non-user) listening starts per window. */
     val maxAutoStarts: Int = 3,
     val autoStartWindowMs: Long = 20_000,

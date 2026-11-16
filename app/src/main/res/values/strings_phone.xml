@@ -85,7 +85,7 @@
     <string name="st_list_countdown_sum">%1$s שניות – אחרי מספר, שם, או לחיצה על שורה</string>
     <string name="st_list_countdown_zero">0 – חיוג מיידי מהרשימה (ברירת מחדל)</string>
     <string name="st_continue_hidden">המשך אחרי יציאה</string>
-    <string name="st_continue_hidden_sum">כבוי (ברירת מחדל): יציאה מהמסך עוצרת הקשבה, בלי הקראה אחרי 10 שנ׳. דולק: החלון ממשיך ברקע. שיחה יוצאת אף פעם לא מתבטלת.</string>
+    <string name="st_continue_hidden_sum">כבוי (ברירת מחדל): יציאה עוצרת הקשבה ומבטלת ספירה לפני חיוג. דולק: הקשבה וספירה לאחור ממשיכות ברקע עד לחיוג. שיחה שכבר יצאה אף פעם לא מתבטלת.</string>
     <string name="st_timing_reset">איפוס זמנים לברירת מחדל</string>
     <string name="st_timing_reset_sum">10 שנ׳ לשם · 30 שנ׳ לרשימה · 5 שנ׳ להתאמה אחת · 0 לרשימה</string>
     <string name="st_cat_aa">הצגה ב-Android Auto</string>

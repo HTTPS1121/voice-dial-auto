@@ -786,16 +786,12 @@ private fun DialSubScreen(
         SettingsGroup(title = stringResource(R.string.st_hdr_dial)) {
             SettingsSliderTile(
                 title = stringResource(R.string.st_countdown),
-                valueLabel = if (countdownHalf == 0) "מיידי" else "$halfFormatted שנ׳",
-                subtitle = if (countdownHalf == 0) {
-                    stringResource(R.string.st_countdown_zero)
-                } else {
-                    stringResource(R.string.st_countdown_sum, halfFormatted)
-                },
+                valueLabel = "$halfFormatted שנ׳",
+                subtitle = stringResource(R.string.st_countdown_sum, halfFormatted),
                 icon = Icons.Rounded.Timer,
                 value = countdownHalf.toFloat(),
-                valueRange = 0f..Prefs.COUNTDOWN_MAX_HALF_S.toFloat(),
-                steps = Prefs.COUNTDOWN_MAX_HALF_S - 1,
+                valueRange = Prefs.COUNTDOWN_MIN_HALF_S.toFloat()..Prefs.COUNTDOWN_MAX_HALF_S.toFloat(),
+                steps = Prefs.COUNTDOWN_MAX_HALF_S - Prefs.COUNTDOWN_MIN_HALF_S - 1,
                 onValueChange = {
                     val v = it.roundToInt()
                     countdownHalf = v

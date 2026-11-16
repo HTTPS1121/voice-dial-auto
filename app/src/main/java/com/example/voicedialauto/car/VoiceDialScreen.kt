@@ -43,27 +43,58 @@ class VoiceDialScreen(carContext: CarContext, private val controller: DialContro
      * (3) invalidations are throttled to one per [MIN_INVALIDATE_MS].
      */
     private fun onState(s: DialState) {
+        // Processing lasts ~2ms while matching contacts in memory; skip intermediate invalidation
+        // so AA transitions cleanly in a single step straight to ConfirmCallScreen or ContactListScreen.
+        if (s is DialState.Processing) return
+
         val top = runCatching { screenManager.top }.getOrNull()
         if (top == null) {
             refreshRoot()
             return
         }
-        if (needsList(s)) {
-            if (top is ContactListScreen) top.refresh()
-            else { rootKey = null; screenManager.push(ContactListScreen(carContext, controller)) }
-            val oor = (s as? DialState.Choosing)?.outOfRange
-            if (oor != null && oor != lastOutOfRange) {
-                CarToast.makeText(
-                    carContext,
-                    carContext.getString(R.string.car_out_of_range, oor),
-                    CarToast.LENGTH_SHORT,
-                ).show()
+        when {
+            needsList(s) -> {
+                if (top is ContactListScreen) top.refresh()
+                else {
+                    if (top !is VoiceDialScreen) screenManager.popToRoot()
+                    rootKey = null
+                    screenManager.push(ContactListScreen(carContext, controller))
+                }
+                val oor = (s as? DialState.Choosing)?.outOfRange
+                if (oor != null && oor != lastOutOfRange) {
+                    CarToast.makeText(
+                        carContext,
+                        carContext.getString(R.string.car_out_of_range, oor),
+                        CarToast.LENGTH_SHORT,
+                    ).show()
+                }
+                lastOutOfRange = oor
             }
-            lastOutOfRange = oor
-        } else {
-            lastOutOfRange = null
-            if (top is ContactListScreen) { screenManager.pop(); rootKey = null }
-            refreshRoot()
+            s is DialState.Confirm -> {
+                lastOutOfRange = null
+                if (top is ConfirmCallScreen) top.refresh()
+                else {
+                    if (top !is VoiceDialScreen) screenManager.popToRoot()
+                    rootKey = null
+                    screenManager.push(ConfirmCallScreen(carContext, controller))
+                }
+            }
+            s is DialState.Calling -> {
+                lastOutOfRange = null
+                if (top is ConfirmCallScreen) top.refresh()
+                else {
+                    if (top !is VoiceDialScreen) { screenManager.popToRoot(); rootKey = null }
+                    refreshRoot()
+                }
+            }
+            else -> {
+                lastOutOfRange = null
+                if (top !is VoiceDialScreen) {
+                    screenManager.popToRoot()
+                    rootKey = null
+                }
+                refreshRoot()
+            }
         }
     }
 
