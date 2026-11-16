@@ -46,8 +46,11 @@ class Endpointer(
     /** Returns true if the (meaningful) partial changed. Blank/punctuation-only partials are ignored. */
     fun onPartial(text: String, now: Long): Boolean {
         if (!isMeaningful(text)) return false
-        if (text == lastPartial) return false
+        val norm = normalizeTokens(text)
+        if (norm.isEmpty()) return false
+        val prevNorm = lastPartial?.let(::normalizeTokens).orEmpty()
         lastPartial = text
+        if (norm == prevNorm) return false
         partialChangedAt = now
         speechConfirmed = true
         return true
@@ -88,6 +91,11 @@ class Endpointer(
 
     companion object {
         fun isMeaningful(text: String?): Boolean = text != null && text.any { it.isLetterOrDigit() }
+        fun normalizeTokens(text: String): String =
+            text.lowercase()
+                .replace(Regex("[^\\p{L}\\p{Nd}\\s]"), " ")
+                .trim()
+                .replace(Regex("\\s+"), " ")
         /** Delay between deciding to end and calling stopListening (cancellable). */
         const val CONFIRM_MS = 250L
     }

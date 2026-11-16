@@ -118,4 +118,12 @@ class EndpointerTest {
         repeat(100) { ep.onRms(1f, t); t += 50 }          // … then quiet
         assertTrue(ep.loudSeen); assertFalse(ep.shouldEnd(t))
     }
+
+    @Test fun punctuationJitterDoesNotResetStability() {
+        val ep = Endpointer(1_000)
+        assertTrue(ep.onPartial("משה כהן", 1_000))
+        assertFalse(ep.onPartial("משה כהן.", 1_400))
+        assertFalse(ep.onPartial("משה  כהן? ", 1_700))
+        assertTrue(ep.shouldEnd(2_000))
+    }
 }

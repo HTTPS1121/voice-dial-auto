@@ -47,7 +47,7 @@ import com.example.voicedialauto.speech.vad.VadSettings
  */
 class VoiceRecognizer(
     private val context: Context,
-    private val carContext: CarContext?,
+    private var carContext: CarContext?,
     private val useCarMic: () -> Boolean = { false },
     /** Stable-partial / RMS quiet duration before we force end-of-speech (ms). */
     private val endOfSpeechSilenceMs: () -> Long = { DEFAULT_END_SILENCE_MS },
@@ -84,7 +84,8 @@ class VoiceRecognizer(
         }
         // Duck immediately — not after VAD load / AudioRecord / StartGate. AA ducks late if we wait.
         ensureDuck()
-        val carMicPossible = useCarMic && carContext != null && MicPump.carMicSupported(carContext)
+        val cc = carContext
+        val carMicPossible = useCarMic && cc != null && MicPump.carMicSupported(cc)
         // v15: give the recognizer service / CarAudioRecord a moment after a car-mic session or a
         // cancel (error 11 within ~30 ms otherwise). Everything of the old session is released now.
         destroyPending()
@@ -122,8 +123,10 @@ class VoiceRecognizer(
         val mySession = ++sessionId
         active = true
         main.removeCallbacks(dropWarm)
-        // Reuse only for continuous phone-mic sessions (the car-mic pump needs a fresh intent/pipe).
-        val reuse = allowReuse && options.continuous && !carMic && warm != null
+        // Own capture (pipe) needs a fresh recognizer — a warm instance is bound to the previous pipe.
+        val ownMic = !carMic && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            audioPolicy.allowOwnAudio(SystemClock.elapsedRealtime())
+        val reuse = allowReuse && options.continuous && !carMic && !ownMic && warm != null
         val sr = if (reuse) warm!!.also { warm = null } else {
             releaseWarm()
             SpeechRecognizer.createSpeechRecognizer(context)
@@ -138,69 +141,68 @@ class VoiceRecognizer(
         val sessionMs = if (options.continuous) {
             options.maxSessionMs.takeIf { it > 0 }?.coerceIn(3_000L, MAX_CONTINUOUS_SESSION_MS) ?: MAX_CONTINUOUS_SESSION_MS
         } else 0L
-        // v12: segmented session (API 33+): one session across pauses between words; it ends only
-        // when OUR end-of-speech detection calls stopListening (or the minimum length elapses).
-        val segmented = options.segmented && options.continuous && !carMic &&
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && segmentedEnabled() && !segmentedBroken
+        // Direct Google SpeechRecognizer endpointing (same pipeline as Waze / Gemini): never lock
+        // the recognizer open for 10s with EXTRA_SEGMENTED_SESSION.
+        val segmented = false
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false)
-            // FREE_FORM (not WEB_SEARCH, which endpoints more aggressively).
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, lang)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
-            // Hints — not all recognition services honour these, so we also endpoint ourselves.
-            if (options.continuous) {
-                // Nobody has spoken yet: keep the session open through noise as long as allowed.
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, CONTINUOUS_SILENCE_MS)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, CONTINUOUS_SILENCE_MS)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, sessionMs)
-                if (segmented && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    putExtra(
-                        RecognizerIntent.EXTRA_SEGMENTED_SESSION,
-                        RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS,
-                    )
-                }
-            } else {
-                // v11: 1.5 s / 1.2 s at the 1.8 s default (v10: 1.2 / 0.9 cut "חני כהן" to "חני").
-                val complete = completeSilenceFor(silenceMs)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, complete)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, complete - 300L)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 400L)
-            }
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, NATURAL_COMPLETE_SILENCE_MS)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, NATURAL_POSSIBLY_COMPLETE_SILENCE_MS)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 450L)
         }
 
-        // v13: capture the audio OURSELVES (phone AudioRecord or car CarAudioRecord) and hand it to
-        // the recognizer via EXTRA_AUDIO_SOURCE, so a real VAD (Silero; WebRTC fallback) can run on
-        // the same frames. Not possible (Android < 13, VAD off, recognizer rejected it) → RMS fallback.
+        // Own capture: VOICE_RECOGNITION + NavDuck (media ducks, does not pause). Silero/WebRTC
+        // on that same PCM decides end-of-speech — the car's Google session does not close a
+        // short name, so we must not wait for onResults / onPartial.
         val vs = vadSettings()
         var onFrame: (Float, Float, Long) -> Unit = { _, _, _ -> }
         var whyNoVad = ""
-        val ownAllowed = audioPolicy.allowOwnAudio(SystemClock.elapsedRealtime())
-        StartGate.recognizerMicReason(MicPump.isSupported(), vs.enabled, carMic, ownAllowed, audioPolicy.reason)?.let { r ->
-            whyNoVad = if (!ownAllowed) "$r for ${(audioPolicy.disabledUntil - SystemClock.elapsedRealtime()) / 1000}s" else r
+        fun dropPumpExtras() {
+            intent.removeExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE)
+            intent.removeExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_CHANNEL_COUNT)
+            intent.removeExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_ENCODING)
+            intent.removeExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_SAMPLING_RATE)
         }
-        if (whyNoVad.isEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        if (ownMic) {
             try {
                 val engine = if (vs.enabled) runCatching { VadEngine.get(context) }.getOrNull() else null
                 if (engine == null) whyNoVad = if (vs.enabled) "VAD engines failed to load" else "VAD off in settings"
-                val p = if (carMic) MicPump.car(carContext!!, engine) { pr, db, at -> onFrame(pr, db, at) }
-                else MicPump.phone(context, engine, duckMedia = source == "car") { pr, db, at -> onFrame(pr, db, at) }
+                val p = MicPump.phone(context, vad = engine, duckMedia = true) { pr, db, at -> onFrame(pr, db, at) }
                 pump = p
                 p.attachTo(intent)
                 p.start()
             } catch (t: Throwable) {
-                Log.w(TAG, "Own audio capture unavailable (carMic=$carMic)", t)
-                FileLog.log("vad", "own capture failed (carMic=$carMic): ${t.javaClass.simpleName} ${t.message}", source)
-                whyNoVad = "own capture failed: ${t.javaClass.simpleName}"
+                Log.w(TAG, "Phone audio capture unavailable", t)
+                FileLog.log("vad", "phone capture failed: ${t.javaClass.simpleName} ${t.message}", source)
+                whyNoVad = "phone capture failed: ${t.javaClass.simpleName}"
                 pump?.stop(); pump = null
-                // The intent may already carry the (now dead) pipe → rebuild it without the source.
-                intent.removeExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE)
-                intent.removeExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_CHANNEL_COUNT)
-                intent.removeExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_ENCODING)
-                intent.removeExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_SAMPLING_RATE)
+                dropPumpExtras()
+            }
+        } else if (carMic && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            try {
+                val engine = if (vs.enabled) runCatching { VadEngine.get(context) }.getOrNull() else null
+                if (engine == null) whyNoVad = if (vs.enabled) "VAD engines failed to load" else "VAD off in settings"
+                val cc = carContext
+                if (cc != null) {
+                    val p = MicPump.car(cc, engine) { pr, db, at -> onFrame(pr, db, at) }
+                    pump = p
+                    p.attachTo(intent)
+                    p.start()
+                } else {
+                    whyNoVad = "car context detached"
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "Car audio capture unavailable", t)
+                FileLog.log("vad", "car capture failed: ${t.javaClass.simpleName} ${t.message}", source)
+                whyNoVad = "car capture failed: ${t.javaClass.simpleName}"
+                pump?.stop(); pump = null
+                dropPumpExtras()
             }
         }
         val usingCarMic = pump?.label == "car"
@@ -223,7 +225,7 @@ class VoiceRecognizer(
         }
         val vad = VadEndpointer(vs.sensitivity.start, vs.sensitivity.end, vs.hangoverMs.coerceIn(VadEndpointer.MIN_HANGOVER_MS, VadEndpointer.MAX_HANGOVER_MS))
         // RMS/stability endpointer: the whole job without VAD; with VAD only the 2.5 s stable-transcript net.
-        val ep = Endpointer(silenceMs, maxStableMs = if (vadOn) VadEndpointer.STABLE_FALLBACK_MS else maxOf(silenceMs * 2, VadEndpointer.STABLE_FALLBACK_MS))
+        val ep = Endpointer(silenceMs.coerceAtMost(STABLE_AFTER_SPEECH_MS), maxStableMs = STABLE_AFTER_SPEECH_MS)
         var ending = false
         var readySeen = false
         var stopAt = 0L
@@ -257,7 +259,7 @@ class VoiceRecognizer(
         ).also { ev("end: $end") }
 
         /** Terminal: keep the instance warm if this was a clean continuous session end. */
-        fun end(keepWarm: Boolean) = finish(keepWarm = keepWarm && options.continuous && !usingCarMic)
+        fun end(keepWarm: Boolean) = finish(keepWarm = keepWarm && options.continuous && !usingPump)
 
         fun deliverResults(list: List<String>, how: String) {
             if (mySession != sessionId) return
@@ -284,6 +286,12 @@ class VoiceRecognizer(
                 listener.onFinalResults(listOf(p), byApp)
                 return
             }
+            // VAD already closed the pipe; Google often fires NO_MATCH before onResults.
+            // Let the grace timer collect a late partial/final instead of killing the utterance.
+            if (ending && (mapped == RecognitionError.NO_SPEECH || mapped == RecognitionError.OTHER)) {
+                ev("error$code during end, waiting grace")
+                return
+            }
             log("error$code")
             end(keepWarm = mapped == RecognitionError.NO_SPEECH)
             listener.onError(mapped)
@@ -296,13 +304,17 @@ class VoiceRecognizer(
             stopAt = SystemClock.elapsedRealtime()
             ev("stopListening: $reason \"${ep.lastPartial}\" t_lastSpeech=${rel(vad.lastSpeechAt)} t_stop=${rel(stopAt)}")
             Log.i(TAG, "$reason → stopListening (\"${ep.lastPartial}\")")
+            // Closing OUR pipe is what actually finalizes Google on the phone. cancel() drops
+            // the utterance we still need when there is no partial yet. stopListening + grace
+            // lets onResults win; if it never comes we commit lastPartial.
+            pump?.stop()
             runCatching { sr.stopListening() }
-            pump?.stop() // end of the audio stream → the recognizer finalizes right away
-            // v11: wait up to RESULTS_GRACE_MS for the FINAL results (they usually contain every
-            // word; partials lag), and only then fall back to the last partial.
+            val grace = if (ep.lastPartial != null) RESULTS_GRACE_MS else NO_PARTIAL_GRACE_MS
             main.postDelayed({
-                if (mySession == sessionId && active) deliverResults(emptyList(), "$reason+grace")
-            }, RESULTS_GRACE_MS)
+                if (mySession == sessionId && active) {
+                    deliverResults(listOfNotNull(ep.lastPartial), "$reason+grace")
+                }
+            }, grace)
         }
 
         // v11: an end decision is confirmed CONFIRM_MS later; louder input / a new partial cancels it.
@@ -326,10 +338,13 @@ class VoiceRecognizer(
             override fun run() {
                 if (mySession != sessionId || !active || ending) return
                 val now = SystemClock.elapsedRealtime()
-                if (vadOn) {
-                    if (ep.stableFor(now) >= VadEndpointer.STABLE_FALLBACK_MS) forceEnd("stable ${VadEndpointer.STABLE_FALLBACK_MS}ms (vad net)")
-                    else if (vad.shouldEnd(now, ep.speechConfirmed, ep.changedAt)) forceEnd("vad silence ${vad.silenceFor(now)}ms")
-                } else if (ep.shouldEnd(now)) considerEnd("stable ${silenceMs}ms+quiet")
+                if (ep.stableFor(now) >= STABLE_AFTER_SPEECH_MS) {
+                    forceEnd("stable ${STABLE_AFTER_SPEECH_MS}ms")
+                } else if (vadOn) {
+                    if (vad.shouldEnd(now, ep.speechConfirmed, ep.changedAt)) forceEnd("vad silence ${vad.silenceFor(now)}ms")
+                } else if (ep.shouldEnd(now)) {
+                    forceEnd("stable+quiet")
+                }
                 if (!ending && ep.speechConfirmed) main.postDelayed(this, STABILITY_TICK_MS)
             }
         }
@@ -357,9 +372,12 @@ class VoiceRecognizer(
                 catchUpLogged = true
                 ev("end held: VAD speech at ${rel(vad.segmentStartAt)} after last transcript ${rel(ep.changedAt)} → wait ≤${vad.catchUpMs}ms")
             }
-            if (!ending && vad.shouldEnd(at, ep.speechConfirmed, ep.changedAt)) {
-                ev("end decided: vad silence ${vad.silenceFor(at)}ms ≥ ${vad.hangoverMs}ms t_lastSpeech=${rel(vad.lastSpeechAt)} t_endDecided=${rel(at)}")
-                forceEnd("vad")
+            if (!ending && ep.speechConfirmed && ep.stableFor(at) >= VadEndpointer.STABLE_FALLBACK_MS) {
+                forceEnd("stable ${VadEndpointer.STABLE_FALLBACK_MS}ms (frame)")
+            } else if (!ending && vad.shouldEnd(at, ep.speechConfirmed, ep.changedAt)) {
+                val why = if (ep.speechConfirmed) "vad" else "vad-no-transcript"
+                ev("end decided: $why silence ${vad.silenceFor(at)}ms ≥ ${vad.hangoverMs}ms t_lastSpeech=${rel(vad.lastSpeechAt)} t_endDecided=${rel(at)}")
+                forceEnd(why)
             }
         }
 
@@ -392,14 +410,16 @@ class VoiceRecognizer(
             }
 
             override fun onPartialResults(partialResults: Bundle?) {
-                if (mySession != sessionId || ending) return
+                if (mySession != sessionId) return
                 val raw = extractHypotheses(partialResults).firstOrNull() ?: return
                 ev("onPartialResults \"$raw\"")
                 val text = if (segmented) { segPartial = raw; transcript() } else raw
-                if (ep.onPartial(text, SystemClock.elapsedRealtime())) {
+                val changed = ep.onPartial(text, SystemClock.elapsedRealtime())
+                if (ending) return
+                if (changed) {
                     listener.onPartial(text)
                     main.removeCallbacks(stabilityCheck)
-                    main.postDelayed(stabilityCheck, silenceMs)
+                    main.postDelayed(stabilityCheck, STABILITY_TICK_MS)
                 }
             }
 
@@ -425,7 +445,7 @@ class VoiceRecognizer(
                 if (!ending && ep.onPartial(t, SystemClock.elapsedRealtime())) {
                     listener.onPartial(t)
                     main.removeCallbacks(stabilityCheck)
-                    main.postDelayed(stabilityCheck, silenceMs)
+                    main.postDelayed(stabilityCheck, STABILITY_TICK_MS)
                 }
             }
 
@@ -619,6 +639,10 @@ class VoiceRecognizer(
         releaseWarm()
     }
 
+    fun detachCarContext() {
+        carContext = null
+    }
+
     fun destroy(keepDuck: Boolean = false) {
         if (!keepDuck) duckPinned = false
         cancel()
@@ -629,9 +653,15 @@ class VoiceRecognizer(
         private const val TAG = "VoiceRecognizer"
         private const val WATCHDOG_MS = 15_000L
         private const val WATCHDOG_SLACK_MS = 5_000L
-        /** v11: was 800 ms — final results often contain the second word the partial missed. */
-        const val RESULTS_GRACE_MS = 600L // v13: was 1.2 s; the closed audio stream makes finals quick
-        private const val STABILITY_TICK_MS = 200L
+        const val RESULTS_GRACE_MS = 350L
+        /** After VAD end with no partial yet: wait this long for Google to flush onResults. */
+        const val NO_PARTIAL_GRACE_MS = 700L
+        private const val STABILITY_TICK_MS = 150L
+        /** Natural Google ASR silence hints (same responsive feel as Waze / Gemini). */
+        private const val NATURAL_COMPLETE_SILENCE_MS = 850L
+        private const val NATURAL_POSSIBLY_COMPLETE_SILENCE_MS = 650L
+        /** Fast safety cap once real words appeared in onPartialResults. */
+        private const val STABLE_AFTER_SPEECH_MS = 950L
         /** Continuous mode: silence hints while nobody has spoken yet. */
         const val CONTINUOUS_SILENCE_MS = 10_000L
         /** Continuous mode: one session never asks for more than this (watchdog = this + slack). */

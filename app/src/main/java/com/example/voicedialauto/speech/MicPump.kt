@@ -57,6 +57,10 @@ class MicPump private constructor(
     private val main = Handler(Looper.getMainLooper())
     @Volatile private var running = false
     private var thread: Thread? = null
+    // First-order 100 Hz high-pass IIR filter for VAD frames only (removes engine/road rumble < 100 Hz;
+    // raw PCM still goes untouched to SpeechRecognizer, which runs its own front-end).
+    private var hpPrevIn = 0f
+    private var hpPrevOut = 0f
     val label: String get() = src.label
     val vadName: String get() = vad?.name ?: "none"
     val captureInfo: String get() = src.info.ifEmpty { "source=${src.label}" }
@@ -72,6 +76,8 @@ class MicPump private constructor(
     fun start() {
         src.start()
         vad?.reset()
+        hpPrevIn = 0f
+        hpPrevOut = 0f
         running = true
         thread = Thread({ loop() }, "mic-pump-${src.label}").also { it.start() }
     }
@@ -80,6 +86,7 @@ class MicPump private constructor(
         val out = ParcelFileDescriptor.AutoCloseOutputStream(pipe[1])
         val buf = ByteArray(2048)
         val frame = ShortArray(VadEngine.FRAME_SAMPLES)
+        val vadFrame = ShortArray(VadEngine.FRAME_SAMPLES)
         var fill = 0
         var lowByte = -1
         try {
@@ -94,8 +101,9 @@ class MicPump private constructor(
                     frame[fill++] = ((b shl 8) or lowByte).toShort(); lowByte = -1
                     if (fill == frame.size) {
                         fill = 0
-                        val prob = vad?.let { runCatching { it.probability(frame) }.getOrDefault(0f) } ?: 0f
-                        val db = rmsDb(frame)
+                        highPass100Hz(frame, vadFrame)
+                        val prob = vad?.let { runCatching { it.probability(vadFrame) }.getOrDefault(0f) } ?: 0f
+                        val db = rmsDb(vadFrame)
                         val at = SystemClock.elapsedRealtime()
                         main.post { if (running) onFrame(prob, db, at) }
                     }
@@ -119,6 +127,21 @@ class MicPump private constructor(
         runCatching { src.stop() }
         thread = null
         runCatching { pipe[0].close() }
+    }
+
+    /** 1st-order high-pass filter (~100 Hz @ 16 kHz, alpha ≈ 0.962) to strip car/engine rumble before VAD. */
+    private fun highPass100Hz(srcFrame: ShortArray, dstFrame: ShortArray) {
+        var prevIn = hpPrevIn
+        var prevOut = hpPrevOut
+        for (i in srcFrame.indices) {
+            val x = srcFrame[i].toFloat()
+            val y = 0.962f * (prevOut + x - prevIn)
+            prevIn = x
+            prevOut = y
+            dstFrame[i] = y.toInt().coerceIn(-32768, 32767).toShort()
+        }
+        hpPrevIn = prevIn
+        hpPrevOut = prevOut
     }
 
     /** Same scale the recognizer's onRmsChanged roughly uses (≈ −2 … 10 dB). */

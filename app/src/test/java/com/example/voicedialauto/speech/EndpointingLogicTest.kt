@@ -15,7 +15,8 @@ class EndpointingLogicTest {
         // and after stopListening we wait at most 600 ms for final results (v11: 1.2 s).
         assertEquals(900L, VoiceRecognizer.DEFAULT_END_SILENCE_MS)
         assertEquals(1_500L, VoiceRecognizer.completeSilenceFor(1_800L))
-        assertEquals(600L, VoiceRecognizer.RESULTS_GRACE_MS)
+        assertEquals(350L, VoiceRecognizer.RESULTS_GRACE_MS)
+        assertEquals(700L, VoiceRecognizer.NO_PARTIAL_GRACE_MS)
     }
 
     @Test fun emptyFinalPrefersPartial() {

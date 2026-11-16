@@ -65,11 +65,20 @@ class VadEndpointerTest {
         assertEquals(null, run(e, Seq().silence(320).frames(0.6f).silence(2_000), transcriptFrom = 0))
     }
 
-    @Test fun noEndWithoutTranscript() {
-        // Speech-like audio but the recognizer produced no text (yet) → keep listening.
-        val e = VadEndpointer()
-        assertEquals(null, run(e, Seq().speech(640).silence(2_000), transcriptFrom = Long.MAX_VALUE))
+    @Test fun noEndAtHangoverWithoutTranscript() {
+        // Hangover alone is not enough: Google still has catchUpMs to emit a partial.
+        val e = VadEndpointer(hangoverMs = 500, catchUpMs = 600)
+        assertEquals(null, run(e, Seq().speech(640).silence(800), transcriptFrom = Long.MAX_VALUE))
         assertTrue(e.speechConfirmed)
+    }
+
+    @Test fun endsAfterCatchUpEvenWithoutTranscript() {
+        // Car Google never sends onPartial for a short name. End on our audio anyway.
+        val e = VadEndpointer(hangoverMs = 500, catchUpMs = 600)
+        val end = run(e, Seq().speech(640).silence(2_000), transcriptFrom = Long.MAX_VALUE)
+        val speechEnd = 640L
+        assertTrue("end=$end", end != null && end!! - speechEnd >= 500 + 600 - F)
+        assertTrue(end!! - speechEnd <= 500 + 600 + 2 * F)
     }
 
     @Test fun lateTranscriptEndsAsSoonAsItArrives() {

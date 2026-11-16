@@ -9,8 +9,11 @@ package com.example.voicedialauto.speech.vad
  * Re-entering speech after silence needs [resumeFrames] consecutive frames ≥ start, so a single
  * noise spike (bump, indicator click) in the trailing silence does not reset the hangover.
  *
- * END = real speech happened (≥ [minSpeechMs] of speech frames) AND the recognizer produced a
- * meaningful transcript, THEN the VAD has been in silence for [hangoverMs] (default 500 ms).
+ * END = real speech happened (≥ [minSpeechMs] of speech frames) AND silence for [hangoverMs]
+ * (default 500 ms). A transcript is preferred but NOT required: the car's Google session often
+ * never sends onPartial/onResults for a short name, so waiting for text is how the list sat
+ * until the 10 s listen window. After hangover + [catchUpMs] we end anyway; VoiceRecognizer
+ * then EOFs our audio pipe so Google can still flush a final.
  * The short pause between two words ("חני … כהן", ~100–300 ms) is shorter than the hangover, so
  * it is not an end; the next word resumes speech and the hangover restarts.
  * Road noise: Silero gives low probabilities for engine/road noise, so noise alone never reaches
@@ -71,17 +74,22 @@ class VadEndpointer(
 
     fun silenceFor(now: Long): Long = if (inSpeech || lastSpeechAt == 0L) 0L else now - lastSpeechAt
 
-    /** [hasTranscript]: the recognizer already produced a meaningful partial/segment. */
+    /**
+     * [hasTranscript]: Google already produced a meaningful partial.
+     * With a caught-up transcript: end at hangover.
+     * With no / lagging transcript: wait hangover+[catchUpMs], then end anyway.
+     */
     fun shouldEnd(now: Long, hasTranscript: Boolean, transcriptAt: Long = Long.MAX_VALUE): Boolean {
-        if (!(hasTranscript && speechConfirmed && !inSpeech && silenceFor(now) >= hangoverMs)) return false
-        if (transcriptAt >= segmentStartAt) return true
+        if (!(speechConfirmed && !inSpeech && silenceFor(now) >= hangoverMs)) return false
+        val caughtUp = hasTranscript && transcriptAt >= segmentStartAt
+        if (caughtUp) return true
         return silenceFor(now) >= hangoverMs + catchUpMs
     }
 
     /** True while an end is held back only because the transcript hasn't caught up (logging). */
     fun waitingForTranscript(now: Long, hasTranscript: Boolean, transcriptAt: Long): Boolean =
-        hasTranscript && speechConfirmed && !inSpeech && silenceFor(now) >= hangoverMs &&
-            transcriptAt < segmentStartAt && !shouldEnd(now, hasTranscript, transcriptAt)
+        speechConfirmed && !inSpeech && silenceFor(now) >= hangoverMs &&
+            !shouldEnd(now, hasTranscript, transcriptAt)
 
     fun summary(): String = "frames=$frames speech=${speechMs}ms max=${"%.2f".format(maxProb)} inSpeech=$inSpeech"
 
@@ -96,6 +104,6 @@ class VadEndpointer(
         const val MIN_HANGOVER_MS = 200L
         const val MAX_HANGOVER_MS = 1_500L
         /** Safety net: a transcript unchanged this long ends the utterance whatever the VAD says. */
-        const val STABLE_FALLBACK_MS = 2_500L
+        const val STABLE_FALLBACK_MS = 1_200L
     }
 }

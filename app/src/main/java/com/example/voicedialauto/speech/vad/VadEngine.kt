@@ -29,17 +29,24 @@ interface VadEngine : AutoCloseable {
         @Volatile var sileroFailed = false
             private set
 
-        /** Silero (primary); WebRTC if Silero cannot load. Cached per process. Blocking (first call ~100 ms). */
+        /** Silero + WebRTC ensemble (primary); WebRTC if Silero cannot load. Cached per process. */
         @Synchronized fun get(context: Context): VadEngine {
             cached?.let { return it }
-            val e: VadEngine = if (!sileroFailed) {
+            val silero = if (!sileroFailed) {
                 runCatching { SileroVad(context.applicationContext) }
                     .onFailure {
                         sileroFailed = true
                         Log.w("VadEngine", "Silero failed", it)
-                        FileLog.log("vad", "Silero failed to load (${it.javaClass.simpleName}: ${it.message}) → WebRTC")
-                    }.getOrNull() ?: WebRtcVad()
-            } else WebRtcVad()
+                        FileLog.log("vad", "Silero failed to load (${it.javaClass.simpleName}: ${it.message}) -> WebRTC")
+                    }.getOrNull()
+            } else null
+            val webrtc = runCatching { WebRtcVad() }.getOrNull()
+            val e: VadEngine = when {
+                silero != null && webrtc != null -> EnsembleVad(silero, webrtc)
+                silero != null -> silero
+                webrtc != null -> webrtc
+                else -> error("No VAD engine available")
+            }
             FileLog.log("vad", "engine=${e.name}")
             cached = e
             return e
@@ -126,4 +133,37 @@ class WebRtcVad : VadEngine {
     }
 
     override fun close() { runCatching { vad.close() } }
+}
+
+/**
+ * Ensemble of Silero neural VAD + WebRTC GMM VAD (VERY_AGGRESSIVE).
+ * Road/AC/wind noise in a real car can hold Silero around 0.35-0.48 and prevent speech end;
+ * requiring WebRTC agreement for borderline frames drops road-noise false holds immediately
+ * while preserving clean speech (high Silero confidence passes directly).
+ */
+class EnsembleVad(
+    private val silero: SileroVad,
+    private val webrtc: WebRtcVad,
+) : VadEngine {
+    override val name = "silero+webrtc"
+
+    @Synchronized override fun reset() {
+        silero.reset()
+        webrtc.reset()
+    }
+
+    @Synchronized override fun probability(frame: ShortArray): Float {
+        val sp = silero.probability(frame)
+        val wp = webrtc.probability(frame)
+        return when {
+            sp >= 0.72f -> sp
+            wp == 0f -> sp * 0.45f
+            else -> sp * (0.65f + 0.35f * wp)
+        }
+    }
+
+    override fun close() {
+        silero.close()
+        webrtc.close()
+    }
 }
