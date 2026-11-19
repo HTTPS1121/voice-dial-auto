@@ -6,6 +6,7 @@
     <string name="car_title">Voice Dial</string>
     <string name="car_listening_lang">Listening (%1$s)… say a contact name</string>
     <string name="car_heard">Heard: \"%1$s\"</string>
+    <string name="car_heard_empty">Heard: …</string>
     <string name="car_searching">Searching for \"%1$s\"…</string>
     <string name="car_calling">Calling %1$s…</string>
     <string name="car_call_failed">Could not start the call to %1$s</string>

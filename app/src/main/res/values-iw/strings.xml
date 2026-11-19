@@ -5,6 +5,7 @@
     <string name="car_title">חיוג קולי</string>
     <string name="car_listening_lang">מקשיב (%1$s)… אמור שם של איש קשר</string>
     <string name="car_heard">שמעתי: \"%1$s\"</string>
+    <string name="car_heard_empty">שמעתי: …</string>
     <string name="car_searching">מחפש את \"%1$s\"…</string>
     <string name="car_calling">מתקשר אל %1$s…</string>
     <string name="car_call_failed">לא ניתן להתחיל שיחה אל %1$s</string>
