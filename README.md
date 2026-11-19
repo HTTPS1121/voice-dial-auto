@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version" src="https://img.shields.io/badge/version-0.18--v16-4C6EF5?style=for-the-badge" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.19--v16-4C6EF5?style=for-the-badge" />
   <img alt="Android 8+" src="https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=for-the-badge&logo=android&logoColor=white" />
   <img alt="Kotlin" src="https://img.shields.io/badge/Kotlin-2.2-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white" />
   <img alt="Android Auto" src="https://img.shields.io/badge/Android%20Auto-Car%20App-4285F4?style=for-the-badge&logo=androidauto&logoColor=white" />
@@ -118,7 +118,7 @@ Android Auto only shows Car App Library apps that look like they came from **Pla
 
 ### 1. Install Voice Dial
 
-Download [**VoiceDial-0.18-v16.apk**](https://github.com/HTTPS1121/voice-dial-auto/releases/latest) → open on the phone (unknown sources) → grant **microphone**, **contacts**, **phone**.
+Download [**VoiceDial-0.19-v16.apk**](https://github.com/HTTPS1121/voice-dial-auto/releases/latest) → open on the phone (unknown sources) → grant **microphone**, **contacts**, **phone**.
 
 ### 2. Install Shizuku
 
@@ -297,7 +297,7 @@ Phone UI and car UI only **render** `DialState`. Behavior lives in `DialControll
 
 ### 1. מתקינים את חיוג קולי
 
-מורידים [**VoiceDial-0.18-v16.apk**](https://github.com/HTTPS1121/voice-dial-auto/releases/latest) > פותחים בטלפון (מקור לא ידוע) > מאשרים **מיקרופון**, **אנשי קשר**, **טלפון**.
+מורידים [**VoiceDial-0.19-v16.apk**](https://github.com/HTTPS1121/voice-dial-auto/releases/latest) > פותחים בטלפון (מקור לא ידוע) > מאשרים **מיקרופון**, **אנשי קשר**, **טלפון**.
 
 ### 2. מתקינים Shizuku
 
