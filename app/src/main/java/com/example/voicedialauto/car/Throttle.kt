@@ -15,11 +15,19 @@ internal class Throttle(
     private val main = Handler(Looper.getMainLooper())
     private var last = 0L
     private var scheduled = false
+    private val trailing = Runnable { scheduled = false; run() }
 
     fun request() {
         if (scheduled) return
         val wait = last + minIntervalMs - SystemClock.elapsedRealtime()
-        if (wait <= 0) run() else { scheduled = true; main.postDelayed({ scheduled = false; run() }, wait) }
+        if (wait <= 0) run() else { scheduled = true; main.postDelayed(trailing, wait) }
+    }
+
+    /** Drop a pending trailing call so a later screen push is not raced by this Screen.invalidate(). */
+    fun cancel() {
+        if (!scheduled) return
+        scheduled = false
+        main.removeCallbacks(trailing)
     }
 
     private fun run() { last = SystemClock.elapsedRealtime(); action() }

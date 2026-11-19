@@ -45,15 +45,23 @@ internal object CarUi {
     }
 
     @Suppress("DEPRECATION")
-    fun ListTemplate.Builder.header(ctx: CarContext, title: String, vararg endActions: Action?): ListTemplate.Builder {
+    fun ListTemplate.Builder.header(
+        ctx: CarContext,
+        title: String,
+        vararg endActions: Action?,
+        startAction: Action? = Action.BACK,
+    ): ListTemplate.Builder {
         val actions = endActions.filterNotNull()
         return if (ctx.carAppApiLevel >= CarAppApiLevels.LEVEL_7) {
             setHeader(
-                Header.Builder().setTitle(title).setStartHeaderAction(Action.BACK)
-                    .apply { actions.forEach { addEndHeaderAction(it) } }.build(),
+                Header.Builder().setTitle(title).apply {
+                    startAction?.let { setStartHeaderAction(it) }
+                    actions.forEach { addEndHeaderAction(it) }
+                }.build(),
             )
         } else {
-            setTitle(title).setHeaderAction(Action.BACK).apply {
+            setTitle(title).apply {
+                startAction?.let { setHeaderAction(it) }
                 if (actions.isNotEmpty()) {
                     setActionStrip(ActionStrip.Builder().apply { actions.forEach { addAction(it) } }.build())
                 }
