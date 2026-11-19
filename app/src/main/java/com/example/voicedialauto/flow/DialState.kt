@@ -101,6 +101,13 @@ data class DialConfig(
     val hideDebounceMs: Long = 400,
     /** Keep media ducked after dialing until the phone call grabs audio (or this timeout). */
     val duckHoldAfterDialMs: Long = 3_000,
+    /**
+     * Car: after the root Screen's first Confirm/List onGetTemplate returns, wait this long
+     * before SpeechRecognizer / confirm TTS (posted off onGetTemplate). Keep small — result UI
+     * is drawn on the same Screen (no push); the old multi-second delay was the driving host
+     * refusing to paint a pushed Screen, not a need for a long hold.
+     */
+    val carResultPaintMs: Long = 0, // VoiceDialScreen already delays RESULT_AUDIO_DELAY_MS before arming
     val suggestionThreshold: Double = 0.35,
     val maxSuggestions: Int = 3,
     /** Match threshold (ContactMatcher). Lowered in v7 for first-name / cross-script. */

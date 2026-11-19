@@ -92,6 +92,15 @@ class DialController(
     private var heldWords: List<String> = emptyList()
     /** Fires [nameHoldMs] after the utterance stopped growing. Independent of Google's onResults. */
     private var nameCommit: Cancellable? = null
+    /**
+     * Car list/confirm: state is already Choosing/Confirm (first root template is correct) but
+     * SpeechRecognizer / TTS wait for [onCarResultScreenShown] after that template is delivered.
+     */
+    private var carListAwaitingUi = false
+    private var carConfirmAwaitingUi = false
+    private var pendingConfirmPrompt: Pair<String, String>? = null
+    /** Deferred list-mic / confirm-TTS after the car host has the first result template. */
+    private var carPaintTask: Cancellable? = null
 
     /** Number of times the recognizer was started (diagnostics / tests). */
     var recognizerStarts = 0
@@ -200,7 +209,7 @@ class DialController(
     /** True while an active listen / match / countdown should keep running in the background. */
     fun hasActiveBackgroundWork(): Boolean = when (val s = state) {
         is DialState.Listening, is DialState.Processing, is DialState.Confirm -> true
-        is DialState.Choosing -> s.mic == MicState.LISTENING
+        is DialState.Choosing -> s.mic == MicState.LISTENING || carListAwaitingUi
         else -> false
     }
 
@@ -216,6 +225,10 @@ class DialController(
      */
     fun onDestroyed() {
         hideTask?.cancel(); hideTask = null
+        carListAwaitingUi = false
+        carConfirmAwaitingUi = false
+        pendingConfirmPrompt = null
+        carPaintTask?.cancel(); carPaintTask = null
         visible = false
         hideCommitted = true
         runningWhileHidden = false
@@ -356,7 +369,15 @@ class DialController(
         if (state is DialState.Listening) listenName(languages.primaryLanguage) else emit()
     }
 
-    fun cancel() { FlowLog.d("flow", "cancel (state=${describe(state)})"); userAction(); stopAll(); dropDuck(); set(DialState.Idle()) }
+    fun cancel() {
+        FlowLog.d("flow", "cancel (state=${describe(state)})")
+        userAction()
+        carListAwaitingUi = false
+        carConfirmAwaitingUi = false
+        pendingConfirmPrompt = null
+        carPaintTask?.cancel(); carPaintTask = null
+        stopAll(); dropDuck(); set(DialState.Idle())
+    }
 
     /** Big mic button / header mic action. */
     fun micPressed() {
@@ -746,16 +767,73 @@ class DialController(
     /**
      * Mic opens with the list. When visible, stay silent so the driver can immediately read the
      * screen and say a number; when hidden (background continue), announce multiple matches aloud.
+     *
+     * Car: do **not** start SpeechRecognizer until [onCarResultScreenShown] (root Screen's first
+     * ListTemplate for this Choosing, plus [DialConfig.carResultPaintMs]). Result UI is drawn on
+     * VoiceDialScreen itself — AA driving ignores pushed Screens visually. First template is
+     * already LISTENING so the header mic is red from frame 1.
      */
     private fun enterChoosing(items: List<ContactEntry>) {
+        if (matchSource == "car" && visible) {
+            stopAll()
+            speech.pinDuck()
+            carListAwaitingUi = true
+            set(DialState.Choosing(items, MicState.LISTENING))
+            return
+        }
         listenChoice(items)
-        if (!visible) {
-            val p = prompts ?: return
-            val sp = speaker ?: return
-            val text = p.multiple(items.size).takeIf { it.isNotBlank() } ?: return
-            promptText = text
-            promptSpeaking = true
-            sp.speak(text, p.languageTag) { promptSpeaking = false }
+        announceMultipleIfHidden(items.size)
+    }
+
+    private fun announceMultipleIfHidden(n: Int) {
+        if (visible) return
+        val p = prompts ?: return
+        val sp = speaker ?: return
+        val text = p.multiple(n).takeIf { it.isNotBlank() } ?: return
+        promptText = text
+        promptSpeaking = true
+        sp.speak(text, p.languageTag) { promptSpeaking = false }
+    }
+
+    /**
+     * First Confirm/List template delivered on the root car Screen. Open list mic / play confirm
+     * TTS after [DialConfig.carResultPaintMs] (posted off onGetTemplate).
+     */
+    fun onCarResultScreenShown() {
+        FlowTimeline.mark("shown", scheduler.now())
+        val paintMs = config.carResultPaintMs.coerceAtLeast(0)
+        if (carListAwaitingUi) {
+            carListAwaitingUi = false
+            val s = state as? DialState.Choosing
+            if (s != null) {
+                FlowLog.d("car", "list template delivered -> mic in ${paintMs}ms (${s.items.size})")
+                armCarPaint(paintMs) {
+                    val cur = state as? DialState.Choosing ?: return@armCarPaint
+                    FlowTimeline.mark("mic", scheduler.now())
+                    FlowLog.d("car", "list mic open (${cur.items.size}) timing=${FlowTimeline.current.format()}")
+                    listenChoice(cur.items)
+                }
+            }
+        }
+        if (carConfirmAwaitingUi) {
+            carConfirmAwaitingUi = false
+            val p = pendingConfirmPrompt
+            pendingConfirmPrompt = null
+            if (state is DialState.Confirm && p != null) {
+                FlowLog.d("car", "confirm template delivered -> tts in ${paintMs}ms")
+                armCarPaint(paintMs) {
+                    if (state is DialState.Confirm) say(p.first, p.second)
+                }
+            }
+        }
+    }
+
+    private fun armCarPaint(delayMs: Long, block: () -> Unit) {
+        carPaintTask?.cancel(); carPaintTask = null
+        if (delayMs <= 0) { block(); return }
+        carPaintTask = scheduler.post(delayMs) {
+            carPaintTask = null
+            block()
         }
     }
 
@@ -796,6 +874,7 @@ class DialController(
 
     /** Opens a fresh listening window (Settings, default 30 s) on the list. */
     private fun listenChoice(items: List<ContactEntry>) {
+        carListAwaitingUi = false
         stopAll()
         speech.pinDuck()
         beginWindow(choiceWindowMs()) {
@@ -914,8 +993,14 @@ class DialController(
         val total = delayMs
         if (total <= 0) { call(entry); return }
         val my = ++token
+        val carUi = matchSource == "car" && visible
+        if (carUi) {
+            carConfirmAwaitingUi = true
+            val text = prompt?.takeIf { it.isNotBlank() }
+            pendingConfirmPrompt = if (text != null && prompts != null) text to prompts.languageTag else null
+        }
         set(confirmState(entry, heard, total, total))
-        prompts?.let { p -> prompt?.let { say(it, p.languageTag) } }
+        if (!carUi) prompts?.let { p -> prompt?.let { say(it, p.languageTag) } }
         scheduleTick(my, entry, heard, total, total)
     }
 
@@ -1008,6 +1093,7 @@ class DialController(
         token++
         pending?.cancel(); pending = null
         nameCommit?.cancel(); nameCommit = null
+        carPaintTask?.cancel(); carPaintTask = null
         heldWords = emptyList()
         heardInSession = false
         speaker?.stop()

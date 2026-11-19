@@ -100,7 +100,12 @@ class DialControllerTest {
         speaker: Speaker? = null,
         list: List<ContactEntry> = contacts,
         worker: Worker = Worker.Inline,
-        config: DialConfig = DialConfig(afterCallQuietMs = 60_000, listLimit = 6, hideDebounceMs = 0),
+        config: DialConfig = DialConfig(
+            afterCallQuietMs = 60_000,
+            listLimit = 6,
+            hideDebounceMs = 0,
+            carResultPaintMs = 0,
+        ),
         continueWhenHidden: () -> Boolean = { false },
     ) = DialController(
         timings = timings,
@@ -401,6 +406,41 @@ class DialControllerTest {
         assertTrue(speech.listening); assertTrue(!sp.speaking)
         assertTrue(sp.spoken.isEmpty())
         assertTrue(speech.duckPinned)
+    }
+
+    @Test fun carWaitsForListScreenBeforeOpeningMic() {
+        val c = controller(); c.matchSource = "car"; c.onVisible(); speech.say("תתקשר לדנה")
+        val s = c.state as DialState.Choosing
+        assertEquals(MicState.LISTENING, s.mic) // icon red from frame 1
+        assertTrue(!speech.listening)           // recognizer waits for first template
+        c.onCarResultScreenShown()
+        assertEquals(MicState.LISTENING, (c.state as DialState.Choosing).mic)
+        assertTrue(speech.listening)
+        c.onCarResultScreenShown()
+        assertEquals(2, speech.starts) // name + one list session, no double-open
+    }
+
+    @Test fun carListMicWaitsForPaintHold() {
+        val c = controller(config = DialConfig(
+            afterCallQuietMs = 60_000, listLimit = 6, hideDebounceMs = 0, carResultPaintMs = 400,
+        ))
+        c.matchSource = "car"; c.onVisible(); speech.say("תתקשר לדנה")
+        assertTrue(!speech.listening)
+        c.onCarResultScreenShown()
+        assertTrue(!speech.listening) // still in paint hold
+        clock.advance(399)
+        assertTrue(!speech.listening)
+        clock.advance(1)
+        assertTrue(speech.listening)
+    }
+
+    @Test fun carWaitsForConfirmScreenBeforeTts() {
+        val sp = FakeSpeaker()
+        val c = controller(sp); c.matchSource = "car"; c.onVisible(); speech.say("call Moshe")
+        assertTrue(c.state is DialState.Confirm)
+        assertTrue(sp.spoken.isEmpty())
+        c.onCarResultScreenShown()
+        assertTrue(sp.spoken.isNotEmpty())
     }
 
     @Test fun spokenNumberOnListPicksAndKeepsDuck() {
