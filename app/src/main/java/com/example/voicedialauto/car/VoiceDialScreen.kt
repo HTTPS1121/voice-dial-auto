@@ -1,5 +1,7 @@
 package com.example.voicedialauto.car
 
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import androidx.activity.OnBackPressedCallback
 import androidx.car.app.CarContext
@@ -27,20 +29,23 @@ import com.example.voicedialauto.util.FileLog
 import com.example.voicedialauto.util.Prefs
 
 /**
- * Root car screen (Idle / Listening / errors).
+ * Single car Screen for the whole recognize → result flow.
  *
- * Confirm + multi-match live on dedicated Screens ([ConfirmCallScreen] / [ContactListScreen]).
- * Driving hosts often accept push/invalidate but do not paint them — we also call
- * [ResultForceShow] (startCarApp → onNewIntent) so the host is forced to display the top screen.
- * Listening stays frozen (no partial invalidates) so the result transition is not buried in throttle.
+ * Why results finally paint while driving:
+ * Listening/Processing use [ListTemplate] + setLoading(true). When match lands, we invalidate
+ * to the real List/Message content. Hosts treat loading→content as a **refresh they must paint**
+ * (same path every AA search/POI app uses). Pushing extra Screens / Message→Message is what
+ * left the HU stuck on Listening.
  */
 class VoiceDialScreen(carContext: CarContext, private val controller: DialController) : Screen(carContext) {
 
     private val prefs = Prefs(carContext)
+    private val main = Handler(Looper.getMainLooper())
     private var lastOutOfRange: Int? = null
     private var rootKey: String? = null
-    /** False until the host has called [onGetTemplate] at least once. */
     private var hostHasTemplate = false
+    /** "confirm" / "list" once we've armed mic/TTS for the current result. */
+    private var resultArmedKind: String? = null
     private val throttle = Throttle { if (renderKey(controller.state) != rootKey) invalidate() }
 
     init {
@@ -50,6 +55,7 @@ class VoiceDialScreen(carContext: CarContext, private val controller: DialContro
                 when (controller.state) {
                     is DialState.Choosing -> controller.backFromList()
                     is DialState.Confirm -> controller.cancel()
+                    is DialState.Listening, is DialState.Processing -> controller.cancel()
                     else -> {
                         isEnabled = false
                         carContext.onBackPressedDispatcher.onBackPressed()
@@ -61,7 +67,13 @@ class VoiceDialScreen(carContext: CarContext, private val controller: DialContro
     }
 
     private fun onState(s: DialState) {
-        if (s is DialState.Processing) return
+        // Drop any leftover pushed screens from older builds — results draw on THIS screen only.
+        val top = runCatching { screenManager.top }.getOrNull()
+        if (top != null && top !is VoiceDialScreen) {
+            screenManager.popToRoot()
+            rootKey = null
+            resultArmedKind = null
+        }
 
         val oor = (s as? DialState.Choosing)?.outOfRange
         if (oor != null && oor != lastOutOfRange) {
@@ -74,62 +86,32 @@ class VoiceDialScreen(carContext: CarContext, private val controller: DialContro
         if (s !is DialState.Choosing) lastOutOfRange = null else lastOutOfRange = oor
 
         when (s) {
-            is DialState.Choosing -> {
-                throttle.cancel()
-                ensureResultScreen("list")
-            }
-            is DialState.Confirm, is DialState.Calling -> {
-                throttle.cancel()
-                ensureResultScreen("confirm")
-            }
+            // Stay on the loading ListTemplate — do not invalidate (would fight the result paint).
+            is DialState.Processing -> return
+
             is DialState.Listening -> {
+                resultArmedKind = null
                 ResultForceShow.clear()
-                popResultsIfAny()
                 val key = renderKey(s)
                 if (hostHasTemplate && key == rootKey) return
                 refreshRoot()
             }
+
+            is DialState.Choosing, is DialState.Confirm, is DialState.Calling -> {
+                throttle.cancel()
+                // Immediate invalidate — loading→content refresh. No push, no startCarApp race.
+                if (!hostHasTemplate) return
+                val key = renderKey(s)
+                if (key == rootKey) return
+                FileLog.log("car", "result invalidate kind=${s::class.simpleName}", "car")
+                invalidate()
+            }
+
             else -> {
+                resultArmedKind = null
                 ResultForceShow.clear()
-                popResultsIfAny()
                 refreshRoot()
             }
-        }
-    }
-
-    /** Push dedicated result Screen + force host display via startCarApp. */
-    private fun ensureResultScreen(kind: String) {
-        ResultForceShow.request(carContext, kind)
-        val top = runCatching { screenManager.top }.getOrNull()
-        when (kind) {
-            "list" -> {
-                if (top is ContactListScreen) {
-                    top.refresh()
-                    return
-                }
-                if (top != null && top !is VoiceDialScreen) screenManager.popToRoot()
-                FlowTimeline.mark("push", SystemClock.elapsedRealtime())
-                screenManager.push(ContactListScreen(carContext, controller))
-                FileLog.log("car", "push ContactListScreen (+force-show)", "car")
-            }
-            "confirm" -> {
-                if (top is ConfirmCallScreen) {
-                    top.refresh()
-                    return
-                }
-                if (top != null && top !is VoiceDialScreen) screenManager.popToRoot()
-                FlowTimeline.mark("push", SystemClock.elapsedRealtime())
-                screenManager.push(ConfirmCallScreen(carContext, controller))
-                FileLog.log("car", "push ConfirmCallScreen (+force-show)", "car")
-            }
-        }
-    }
-
-    private fun popResultsIfAny() {
-        val top = runCatching { screenManager.top }.getOrNull() ?: return
-        if (top !is VoiceDialScreen) {
-            screenManager.popToRoot()
-            rootKey = null
         }
     }
 
@@ -142,8 +124,8 @@ class VoiceDialScreen(carContext: CarContext, private val controller: DialContro
     }
 
     private fun renderKey(s: DialState): String = when (s) {
-        is DialState.Listening -> "L|${s.lang}"
-        is DialState.Processing -> "L|${prefs.primaryLanguage}"
+        // Listening + Processing share one key so partials/processing never re-invalidate.
+        is DialState.Listening, is DialState.Processing -> "LOAD|${prefs.primaryLanguage}"
         is DialState.Confirm -> "C|${s.entry.contactId}|${s.entry.number}|${s.secondsLeft}"
         is DialState.Calling -> "CALL|${s.entry.contactId}|${s.entry.number}"
         is DialState.Choosing ->
@@ -157,6 +139,7 @@ class VoiceDialScreen(carContext: CarContext, private val controller: DialContro
         hostHasTemplate = true
         val s = controller.state
         rootKey = renderKey(s)
+        armResultUiIfNeeded(s)
         val title = bidi(carContext, carContext.getString(R.string.car_title))
         return when (s) {
             is DialState.NeedsPermissions -> MessageTemplate.Builder(
@@ -191,12 +174,11 @@ class VoiceDialScreen(carContext: CarContext, private val controller: DialContro
                     .build()
             }
 
-            is DialState.Listening -> listeningTemplate(title, s.lang)
+            // THE FIX: spinner ListTemplate while recognizing — result invalidate is loading→content.
+            is DialState.Listening -> loadingList(carContext.getString(R.string.car_listening_lang, langLabel(s.lang)))
+            is DialState.Processing -> loadingList(carContext.getString(R.string.car_listening_lang, langLabel(prefs.primaryLanguage)))
 
-            is DialState.Processing -> listeningTemplate(title, prefs.primaryLanguage)
-
-            // Fallback if result Screens were not pushed yet (host still showing root briefly).
-            is DialState.Confirm -> confirmTemplate(title, s)
+            is DialState.Confirm -> confirmTemplate(s)
 
             is DialState.Calling ->
                 MessageTemplate.Builder(bidi(carContext, carContext.getString(R.string.car_calling, s.entry.displayName)))
@@ -243,25 +225,69 @@ class VoiceDialScreen(carContext: CarContext, private val controller: DialContro
         }
     }
 
-    private fun confirmTemplate(title: String, s: DialState.Confirm): Template =
-        MessageTemplate.Builder(bidi(carContext, carContext.getString(R.string.car_confirm_wait, s.entry.displayName)))
-            .header(carContext, title, null)
-            .setIcon(CarUi.icon(carContext, R.drawable.ic_call, CarColor.GREEN))
-            .addAction(
-                Action.Builder()
+    private fun loadingList(headerTitle: String): Template {
+        FileLog.log("car", "root LOADING list (await result)", "car")
+        return ListTemplate.Builder()
+            .header(carContext, bidi(carContext, headerTitle), null)
+            .setLoading(true)
+            .build()
+    }
+
+    private fun armResultUiIfNeeded(s: DialState) {
+        val kind = when (s) {
+            is DialState.Confirm, is DialState.Calling -> "confirm"
+            is DialState.Choosing -> "list"
+            else -> null
+        }
+        if (kind == null) {
+            if (s is DialState.Listening || s is DialState.Processing) resultArmedKind = null
+            return
+        }
+        if (kind == resultArmedKind) return
+        resultArmedKind = kind
+        val now = SystemClock.elapsedRealtime()
+        FlowTimeline.mark("shown", now)
+        val matchEnd = FlowTimeline.current.get("matchEnd")
+        val sinceMatch = matchEnd?.let { now - it }
+        FileLog.log(
+            "car",
+            "root $kind CONTENT (loading→result)" + (sinceMatch?.let { " match→shown ${it}ms" } ?: ""),
+            "car",
+        )
+        main.post { controller.onCarResultScreenShown() }
+    }
+
+    /**
+     * Confirm as ListTemplate (not MessageTemplate): same type as the listening spinner, so
+     * loading→rows is a free refresh the driving host is required to paint immediately.
+     * Row titles stay fixed; only secondary text ticks the countdown (refresh-safe).
+     */
+    private fun confirmTemplate(s: DialState.Confirm): Template {
+        val list = ItemList.Builder()
+            .addItem(
+                Row.Builder()
                     .setTitle(bidi(carContext, carContext.getString(R.string.car_call_now)))
-                    .setBackgroundColor(CarColor.GREEN)
+                    .addText(bidi(carContext, s.entry.displayName))
                     .setOnClickListener { controller.callNow() }
                     .build(),
             )
-            .addAction(
-                Action.Builder()
-                    .setTitle(bidi(carContext, carContext.getString(R.string.car_cancel_call_secs, s.secondsLeft)))
-                    .setBackgroundColor(CarColor.RED)
+            .addItem(
+                Row.Builder()
+                    .setTitle(bidi(carContext, carContext.getString(R.string.car_cancel)))
+                    .addText(bidi(carContext, carContext.getString(R.string.car_cancel_call_secs, s.secondsLeft)))
                     .setOnClickListener { controller.cancel() }
                     .build(),
             )
             .build()
+        return ListTemplate.Builder()
+            .header(
+                carContext,
+                bidi(carContext, carContext.getString(R.string.car_confirm_wait, s.entry.displayName)),
+                null,
+            )
+            .setSingleList(list)
+            .build()
+    }
 
     private fun choosingTemplate(s: DialState.Choosing): Template {
         val cap = listCap()
@@ -292,28 +318,6 @@ class VoiceDialScreen(carContext: CarContext, private val controller: DialContro
         carContext.getCarService(androidx.car.app.constraints.ConstraintManager::class.java)
             .getContentLimit(androidx.car.app.constraints.ConstraintManager.CONTENT_LIMIT_TYPE_LIST)
     }.getOrDefault(6).coerceIn(1, 10)
-
-    private fun listeningTemplate(title: String, lang: String): Template {
-        val b = MessageTemplate.Builder(bidi(carContext, carContext.getString(R.string.car_listening_lang, langLabel(lang))))
-            .header(carContext, title, null)
-            .setIcon(CarUi.icon(carContext, R.drawable.ic_mic, CarColor.RED))
-        b.addAction(
-            Action.Builder()
-                .setTitle(bidi(carContext, carContext.getString(R.string.car_cancel)))
-                .setBackgroundColor(CarColor.RED)
-                .setFlags(Action.FLAG_PRIMARY)
-                .setOnClickListener { controller.cancel() }
-                .build(),
-        )
-        b.addAction(
-            Action.Builder()
-                .setTitle(bidi(carContext, carContext.getString(R.string.car_heard_empty)))
-                .setBackgroundColor(CarColor.BLUE)
-                .setOnClickListener { controller.recognizeAgain() }
-                .build(),
-        )
-        return b.build()
-    }
 
     private fun syncContacts() {
         controller.syncContacts { n ->

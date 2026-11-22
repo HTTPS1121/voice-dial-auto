@@ -1,7 +1,6 @@
 package com.example.voicedialauto.car
 
 import android.content.Intent
-import android.os.SystemClock
 import android.util.Log
 import androidx.car.app.Screen
 import androidx.car.app.Session
@@ -16,7 +15,6 @@ import com.example.voicedialauto.flow.Caller
 import com.example.voicedialauto.flow.DialConfig
 import com.example.voicedialauto.flow.DialController
 import com.example.voicedialauto.flow.DialState
-import com.example.voicedialauto.flow.FlowTimeline
 import com.example.voicedialauto.flow.MainThreadScheduler
 import com.example.voicedialauto.flow.ResPrompts
 import com.example.voicedialauto.speech.InterruptionMonitor
@@ -139,34 +137,14 @@ class VoiceDialSession : Session() {
         if (controller.state is DialState.Calling && !interruptions.isInCallNow()) {
             controller.onCallEnded()
         }
-        // startCarApp(SHOW_RESULTS): host must call onGetTemplate on the top Screen and DISPLAY it.
-        // Re-push a fresh result Screen so the forced paint is Confirm/List, not Listening.
-        if (intent.action == ResultForceShow.ACTION) {
-            val sm = carContext.getCarService(androidx.car.app.ScreenManager::class.java)
-            sm.popToRoot()
-            when (val s = controller.state) {
-                is DialState.Choosing -> {
-                    FlowTimeline.mark("push", SystemClock.elapsedRealtime())
-                    sm.push(ContactListScreen(carContext, controller))
-                    FileLog.log("car", "onNewIntent force-show > ContactListScreen", "car")
-                }
-                is DialState.Confirm, is DialState.Calling -> {
-                    FlowTimeline.mark("push", SystemClock.elapsedRealtime())
-                    sm.push(ConfirmCallScreen(carContext, controller))
-                    FileLog.log("car", "onNewIntent force-show > ConfirmCallScreen", "car")
-                }
-                else -> FileLog.log(
-                    "car",
-                    "onNewIntent force-show no-op state=${s::class.simpleName}",
-                    "car",
-                )
-            }
-            return
-        }
-        if (controller.state is DialState.Confirm) {
+        // Leave/re-enter must never stick on a stale Confirm/List — always fresh listen.
+        // (Old SHOW_RESULTS force-show path removed: it raced push/pop and left HU on results.)
+        ResultForceShow.clear()
+        carContext.getCarService(androidx.car.app.ScreenManager::class.java).popToRoot()
+        if (controller.state is DialState.Calling) {
             controller.onVisible()
         } else {
-            carContext.getCarService(androidx.car.app.ScreenManager::class.java).popToRoot()
+            FileLog.log("lifecycle", "onNewIntent → restart (fresh listen)", "car")
             controller.restart()
         }
     }

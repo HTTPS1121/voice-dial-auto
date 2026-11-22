@@ -26,17 +26,19 @@ import com.example.voicedialauto.util.Prefs
 
 /**
  * Numbered ListTemplate for (a) several matches and (b) "did you mean" suggestions.
- * Header mic shows listening vs off. Row tap / spoken number: delay from Settings list countdown
- * (default 0 = call now).
  *
- * Mic opens only after the first [onGetTemplate] returns to the host (posted), never from
- * Screen ON_START — ON_START runs during push, before the host even asks for the template, and
- * starting SpeechRecognizer there freezes the driving host on Listening.
+ * Same pattern every working AA search/list app uses while driving:
+ * first paint = setLoading(true) (breaks out of Listening MessageTemplate), then invalidate
+ * with real rows (loading→content is a free refresh and hosts always paint it).
+ *
+ * Mic opens only after the **content** template is returned (posted), never from ON_START /
+ * loading frame — starting SpeechRecognizer there freezes the driving host on Listening.
  */
 class ContactListScreen(carContext: CarContext, private val controller: DialController) : Screen(carContext) {
 
     private val prefs = Prefs(carContext)
     private val main = Handler(Looper.getMainLooper())
+    private var passedLoading = false
     private var armedMic = false
     private var drawnKey: String? = null
     private val throttle = Throttle { if (key(controller.state) != drawnKey) invalidate() }
@@ -53,6 +55,7 @@ class ContactListScreen(carContext: CarContext, private val controller: DialCont
      * restarts don't redraw at all.
      */
     fun refresh() {
+        if (!passedLoading) return
         if (key(controller.state) != drawnKey) throttle.request()
     }
 
@@ -63,6 +66,19 @@ class ContactListScreen(carContext: CarContext, private val controller: DialCont
     }
 
     override fun onGetTemplate(): Template {
+        if (!passedLoading) {
+            passedLoading = true
+            FileLog.log("car", "list LOADING (break Listening)", "car")
+            main.post {
+                FileLog.log("car", "list LOADING → content invalidate", "car")
+                invalidate()
+            }
+            return ListTemplate.Builder()
+                .header(carContext, bidi(carContext, carContext.getString(R.string.car_choose_title)), null)
+                .setLoading(true)
+                .build()
+        }
+
         drawnKey = key(controller.state)
         val now = SystemClock.elapsedRealtime()
         FlowTimeline.mark("shown", now)
@@ -72,11 +88,9 @@ class ContactListScreen(carContext: CarContext, private val controller: DialCont
             val sincePush = push?.let { now - it }
             FileLog.log(
                 "car",
-                "list template first" + (sincePush?.let { " push→shown ${it}ms" } ?: ""),
+                "list template content" + (sincePush?.let { " push→shown ${it}ms" } ?: ""),
                 "car",
             )
-            // After this method returns the host has the ListTemplate. Post so SpeechRecognizer
-            // never starts inside onGetTemplate / during push.
             main.postDelayed({ controller.onCarResultScreenShown() }, 350L)
         }
         return build()
