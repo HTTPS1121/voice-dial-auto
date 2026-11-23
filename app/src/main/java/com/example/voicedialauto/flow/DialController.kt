@@ -56,6 +56,11 @@ class DialController(
     private val matcher = ContactMatcher(threshold = config.matchThreshold)
     /** "phone" or "car" — set by the host for the debug log. */
     var matchSource: String = ""
+    /**
+     * Car: set before the first [onVisible] when phone audio may still be in call mode after hangup.
+     * Skips starting the mic until the host clears it and calls [restart].
+     */
+    var deferInitialListen: Boolean = false
     /** Current listening request (name or list): window end, fast-failure budget, session start. */
     private var windowEnd = 0L
     private var fastRestarts = 0
@@ -138,9 +143,16 @@ class DialController(
         if (missing.isNotEmpty()) { set(DialState.NeedsPermissions(missing)); return }
 
         if (stoppedOnHide) {
-            if (matchSource == "car" && longAway && !recentlyCalled()) {
-                // Re-opening the app from the AA dock/launcher only triggers onStart -> onVisible:
-                // start listening immediately instead of staying stuck on Idle.
+            // Car: finishCarApp → reopen often gets an AA onStop/onStart flap (< minAway). The old
+            // longAway gate left us Idle with no mic and no duck. Treat car re-show as a real open
+            // unless we're inside the post-call quiet window on the same controller.
+            if (matchSource == "car" && !recentlyCalled()) {
+                stoppedOnHide = false
+                holdAutoListen = false
+            } else if (matchSource == "car" && longAway) {
+                stoppedOnHide = false
+                holdAutoListen = false
+            } else if (matchSource != "car" && longAway && !recentlyCalled()) {
                 stoppedOnHide = false
                 holdAutoListen = false
             } else {
@@ -169,7 +181,9 @@ class DialController(
         val s = state
         val lang = languages.primaryLanguage
         if (holdAutoListen && opened) {
-            if (matchSource == "car" && longAway && !recentlyCalled() && s !is DialState.Calling) {
+            if (matchSource == "car" && !recentlyCalled() && s !is DialState.Calling) {
+                holdAutoListen = false
+            } else if (matchSource == "car" && longAway && s !is DialState.Calling) {
                 holdAutoListen = false
             } else {
                 // After a phone call ended or interrupted us: clear Calling / Listening to Idle.
@@ -184,17 +198,32 @@ class DialController(
             }
         }
         when {
-            !opened -> { opened = true; userAction(); listenName(lang) }
+            !opened -> {
+                opened = true
+                userAction()
+                if (deferInitialListen) {
+                    FlowLog.d("flow", "[$matchSource] defer initial listen (call audio still settling)")
+                    set(DialState.Idle(lastCalledName))
+                } else {
+                    listenName(lang)
+                }
+            }
             s is DialState.NeedsPermissions -> listenName(lang)
             // Host paused us; UI still says listening — open the mic again, never dump to Idle.
             s is DialState.Listening || s is DialState.Processing -> listenName(lang, auto = true)
             s is DialState.Calling ->
                 if (recentlyCalled() || !longAway) set(DialState.Idle(lastCalledName))
                 else listenName(lang, auto = true)
+            // Car reopen after hangup/flap: real user open → listenName (not auto) so circuit breaker
+            // and a failed IN_CALL start can't leave us Idle without duck.
             s is DialState.Idle ->
-                if (recentlyCalled()) set(DialState.Idle(lastCalledName))
-                else if (longAway) listenName(lang, auto = true)
-                else emit()
+                when {
+                    recentlyCalled() && matchSource != "car" -> set(DialState.Idle(lastCalledName))
+                    recentlyCalled() && matchSource == "car" && !longAway -> set(DialState.Idle(lastCalledName))
+                    matchSource == "car" -> { userAction(); listenName(lang) }
+                    longAway -> listenName(lang, auto = true)
+                    else -> emit()
+                }
             s is DialState.Choosing ->
                 if (longAway && autoGuard.tryAcquire(now)) listenChoice(s.items) else set(s.copy(mic = MicState.OFF))
             s is DialState.NoMatch || s is DialState.Failed -> emit()
@@ -233,7 +262,10 @@ class DialController(
         hideCommitted = true
         runningWhileHidden = false
         if (state is DialState.Calling) {
+            // Phone owns audio now — never leave NavDuck pinned on a dying session (breaks the
+            // next open: no duck + interrupt race after hangup).
             stopSpeech()
+            dropDuck()
             return
         }
         stopAll()

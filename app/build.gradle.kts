@@ -15,8 +15,8 @@ android {
         applicationId = "com.example.voicedialauto"
         minSdk = 26
         targetSdk = 36
-        versionCode = 36
-        versionName = "0.21-v18"
+        versionCode = 40
+        versionName = "0.25-v18"
 
         // Car app category, injected into the manifest.
         // Default POI: Android Auto shows it for Play-registered installs (see Settings ->

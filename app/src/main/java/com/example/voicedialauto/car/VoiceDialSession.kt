@@ -1,6 +1,11 @@
 package com.example.voicedialauto.car
 
+import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.car.app.Screen
 import androidx.car.app.Session
@@ -33,6 +38,8 @@ class VoiceDialSession : Session() {
     private lateinit var controller: DialController
     private lateinit var interruptions: InterruptionMonitor
     private var sessionLifecycleStarted = false
+    private val main = Handler(Looper.getMainLooper())
+    private var firstListenTries = 0
 
     override fun onCreateScreen(intent: Intent): Screen {
         val app = runCatching { VoiceDialApp.instance }.getOrNull()
@@ -55,8 +62,22 @@ class VoiceDialSession : Session() {
             speech = recognizer,
             contacts = CachedContactsSource(appCtx),
             caller = Caller { entry ->
-                if (sessionAlive) CallLauncher.call(carContext, entry.number, prefs.useActionCall)
-                else CallLauncher.placeSystemCall(appCtx, entry.number)
+                val ok = if (sessionAlive) {
+                    CallLauncher.call(carContext, entry.number, prefs.useActionCall)
+                } else {
+                    CallLauncher.placeSystemCall(appCtx, entry.number)
+                }
+                // Leave the car UI as soon as the call is placed. Otherwise, after hangup while
+                // still "in" our session, recognition restarts and speaks "no match".
+                if (ok && sessionAlive) {
+                    try {
+                        carContext.finishCarApp()
+                        FileLog.log("lifecycle", "call placed → finishCarApp (lose focus)", "car")
+                    } catch (t: Throwable) {
+                        FileLog.log("lifecycle", "finishCarApp failed: ${t.message}", "car")
+                    }
+                }
+                ok
             },
             scheduler = MainThreadScheduler(),
             permissions = { Permissions.missing(appCtx) },
@@ -69,6 +90,12 @@ class VoiceDialSession : Session() {
             continueWhenHidden = { prefs.continueWhenHidden },
         )
         controller.matchSource = "car"
+        // Hangup→reopen in <1s: audio mode is often still IN_CALL. Starting SpeechRecognizer /
+        // NavDuck then fails silently (no duck, no listen). Defer until mode clears.
+        controller.deferInitialListen = isCallAudio(appCtx)
+        if (controller.deferInitialListen) {
+            FileLog.log("lifecycle", "defer initial listen — call audio still active", "car")
+        }
         interruptions = InterruptionMonitor(
             context = appCtx,
             onCallEnded = { controller.onCallEnded() },
@@ -88,11 +115,7 @@ class VoiceDialSession : Session() {
                 val firstStart = !sessionLifecycleStarted
                 sessionLifecycleStarted = true
                 controller.onVisible()
-                // Ensure the very first car open always listens even if an early AA onStop fired first.
-                if (firstStart && controller.state is DialState.Idle && !interruptions.isInCallNow()) {
-                    FileLog.log("lifecycle", "car first onStart still Idle -> restart listen", "car")
-                    controller.restart()
-                }
+                if (firstStart || controller.deferInitialListen) ensureFirstListen()
             }
             override fun onStop(owner: LifecycleOwner) {
                 FileLog.log("lifecycle", "car session onStop -> hide", "car")
@@ -115,9 +138,9 @@ class VoiceDialSession : Session() {
                 ) == true
                 if (!adopted) {
                     interruptions.stop()
-                    val calling = controller.state is DialState.Calling
                     controller.onDestroyed()
-                    recognizer.destroy(keepDuck = calling)
+                    // Always release NavDuck — phone call audio owns the stream after dial.
+                    recognizer.destroy(keepDuck = false)
                     tts.shutdown()
                 }
             }
@@ -131,6 +154,41 @@ class VoiceDialSession : Session() {
         // phone included).
         controller.onVisible()
         return VoiceDialScreen(carContext, controller)
+    }
+
+    /**
+     * After hangup+immediate reopen, wait until telephony releases audio, then [restart] so
+     * NavDuck + SpeechRecognizer start on a clean MODE_NORMAL (otherwise both fail quietly).
+     */
+    private fun ensureFirstListen() {
+        if (interruptions.isInCallNow() || isCallAudio(carContext)) {
+            if (firstListenTries++ < 40) { // ~8s @ 200ms
+                FileLog.log(
+                    "lifecycle",
+                    "wait call-audio clear try=$firstListenTries state=${controller.state::class.simpleName}",
+                    "car",
+                )
+                main.postDelayed({ ensureFirstListen() }, 200L)
+                return
+            }
+            FileLog.log("lifecycle", "call-audio still set after waits — restart anyway", "car")
+        }
+        controller.deferInitialListen = false
+        when (controller.state) {
+            is DialState.Listening, is DialState.Processing ->
+                FileLog.log("lifecycle", "already listening after call-audio clear", "car")
+            else -> {
+                FileLog.log("lifecycle", "call-audio clear → restart listen+duck", "car")
+                controller.restart()
+            }
+        }
+    }
+
+    private fun isCallAudio(ctx: Context): Boolean {
+        val mode = ctx.getSystemService(AudioManager::class.java).mode
+        return mode == AudioManager.MODE_RINGTONE ||
+            mode == AudioManager.MODE_IN_CALL ||
+            (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && mode == AudioManager.MODE_CALL_SCREENING)
     }
 
     override fun onNewIntent(intent: Intent) {
